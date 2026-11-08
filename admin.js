@@ -7,7 +7,7 @@ const isWork=d=>!((CF.SKIP_SUNDAYS&&d.getDay()===0)||(CF.HOLIDAYS||[]).includes(
 window.workToday=()=>isWork(new Date());window.prevWorkDay=()=>{let d=new Date(Date.now()-864e5);for(let i=0;i<14&&!isWork(d);i++)d=new Date(d-864e5);return ymd(d)};
 const qOf=m=>m.slice(0,4)+'-Q'+(Math.floor((+m.slice(5,7)-1)/3)+1);
 window.tgt=(x,month,k)=>{const r=(D.targets||[]).find(t=>t.exec_id===x&&t.period===month)||null;return r&&r[k]!==''&&r[k]!=null?+r[k]:null};
-window.extraTabs=()=>[...(can(U,'coll')?[['coll','Collections']]:[]),...(can(U,'admin_view')?[['ana','Analysis'],['setup','Setup']]:[])];
+window.extraTabs=()=>[...(window.opsTabs?opsTabs():[]),...(can(U,'coll')?[['coll','Collections']]:[]),...(can(U,'admin_view')?[['ana','Analysis'],['setup','Setup']]:[])];
 const RO=()=>can(U,'admin')?'':'disabled';
 const marketingExecs=()=>[...new Set((D.profiles||[]).filter(p=>p.role==='marketing'&&p.active!==false).map(p=>p.id).concat(execs()))];
 // ----- Setup
@@ -75,8 +75,8 @@ let af={period:today().slice(0,7),exec_id:''};
 function inPer(d){if(!d)return false;d=String(d).slice(0,7);return af.period.includes('Q')?qOf(d)===af.period:d===af.period}
 function anaV(){const E=marketingExecs().filter(x=>!af.exec_id||x===af.exec_id);const pct=(a,t)=>t?`${Math.round(a/t*100)}%`:'—';
  const tsum=(x,k)=>{const r=(D.targets||[]).filter(t=>t.exec_id===x&&t.period===af.period);const v=r.filter(t=>t[k]!=null&&t[k]!=='');return v.length?v.reduce((a,t)=>a+ +t[k],0):null};
- const rows=E.map(x=>{const won=D.enquiries.filter(e=>e.owner_id===x&&e.stage==='Won'&&inPer(e.updated_at||e.created_at));
-  return {x,sales:won.reduce((a,e)=>a+ +e.value,0),qty:won.reduce((a,e)=>a+(+e.qty||0),0),nc:D.customers.filter(c=>c.created_by===x&&inPer(c.created_at)).length,
+ const rows=E.map(x=>{const ord=(D.orders||[]).filter(o=>o.owner_id===x&&o.released&&inPer(o.released_at)),won=D.enquiries.filter(e=>e.owner_id===x&&e.stage==='Won'&&inPer(e.won_at)&&!(D.orders||[]).some(o=>o.enquiry_id===e.id));
+  return {x,sales:ord.reduce((a,o)=>a+(+o.po_qty||0)*(+o.po_price||0),0)+won.reduce((a,e)=>a+ +e.value,0),qty:ord.reduce((a,o)=>a+(+o.po_qty||0),0)+won.reduce((a,e)=>a+(+e.qty||0),0),nc:D.customers.filter(c=>c.created_by===x&&inPer(c.created_at)).length,
   ncv:D.visits.filter(v=>v.by_id===x&&v.customer_type==='New'&&inPer(v.date)).length,vis:D.visits.filter(v=>v.by_id===x&&inPer(v.date)).length,
   col:(D.collections||[]).filter(c=>inPer(c.date)&&(D.invoices||[]).some(i=>i.id===c.invoice_id&&i.exec_id===x)).reduce((a,c)=>a+ +c.amount,0)}});
  const cell=(a,t,m)=>`<td>${m?inr(a):a} / ${t==null?'—':(m?inr(t):t)} <small>${pct(a,t)}</small></td>`;
@@ -84,10 +84,10 @@ function anaV(){const E=marketingExecs().filter(x=>!af.exec_id||x===af.exec_id);
  const pers=[...new Set([today().slice(0,7),qOf(today().slice(0,7)),...(D.targets||[]).map(t=>t.period),...D.visits.map(v=>(v.date||'').slice(0,7))])].sort().reverse();
  return `<div class="card grid"><div><label>Period</label><select id="ap">${pers.map(p=>`<option ${af.period===p?'selected':''}>${p}</option>`).join('')}</select></div><div><label>Executive</label><select id="ax"><option value="">All</option>${marketingExecs().map(x=>`<option value="${esc(x)}" ${af.exec_id===x?'selected':''}>${esc(pname(x))}</option>`).join('')}</select></div></div>
  <div class="card tw"><h2>Target vs achievement — ${esc(af.period)}</h2><table><tr><th>Executive</th><th>Sales (won)</th><th>Qty</th><th>New customers</th><th>New-cust visits</th><th>All visits</th><th>Collections</th></tr>
- ${rows.map(r=>`<tr><td>${esc(pname(r.x))}</td>${cell(r.sales,tsum(r.x,'sales_value'),1)}${cell(r.qty,tsum(r.x,'qty'))}${cell(r.nc,tsum(r.x,'new_customers'))}${cell(r.ncv,tsum(r.x,'new_cust_visits'))}<td>${r.vis}</td>${cell(r.col,tsum(r.x,'collections'),1)}</tr>`).join('')}</table><small>Shown as achieved / target.</small></div>
+ ${rows.map(r=>`<tr><td>${esc(pname(r.x))}</td>${cell(r.sales,tsum(r.x,'sales_value'),1)}${cell(r.qty,tsum(r.x,'qty'))}${cell(r.nc,tsum(r.x,'new_customers'))}${cell(r.ncv,tsum(r.x,'new_cust_visits'))}<td>${r.vis}</td>${cell(r.col,tsum(r.x,'collections'),1)}</tr>`).join('')}</table><small>Shown as achieved / target. Sales = released orders (PO qty × price) by release date, plus won enquiries without an order by won date.</small></div>
  <div class="grid"><div class="card">Open pipeline<div class="kpi">${inr(open.reduce((a,e)=>a+ +e.value,0))}</div><small>${STAGES.map(s=>`${s}: ${open.filter(e=>e.stage===s).length}`).filter(s=>!s.endsWith(' 0')).join(' · ')}</small></div>
  <div class="card">Outstanding<div class="kpi">${inr(I.reduce((a,i)=>a+outst(i),0))}</div><small>${BK.map(b=>`${b}: ${inr(I.filter(i=>bucket(i)===b).reduce((a,i)=>a+outst(i),0))}`).join(' · ')}</small></div>
  <div class="card">Incentive earned (all won)<div class="kpi">${inr(Math.round(W.reduce((a,w)=>a+w.inc,0)))}</div><small>${[...new Set(W.map(w=>w.e.owner_id))].map(o=>`${esc(pname(o))}: ${inr(Math.round(W.filter(w=>w.e.owner_id===o).reduce((a,w)=>a+w.inc,0)))}`).join(' · ')||'No won deals'}</small></div></div>`}
 window.bind_ana=()=>{$('#ap').onchange=e=>{af.period=e.target.value;render()};$('#ax').onchange=e=>{af.exec_id=e.target.value;render()}};
-window.VIEWS={setup:setupV,coll:collV,ana:anaV};
+window.VIEWS={...(window.VIEWS||{}),setup:setupV,coll:collV,ana:anaV};
 (async()=>{try{U=await DB.user()}catch(e){return loginPage(e.message)}U?start():loginPage()})();
