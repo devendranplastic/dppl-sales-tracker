@@ -1,0 +1,55 @@
+-- DPPL Sales & Order Tracker — Phase 1 schema. Run in Supabase SQL editor.
+create extension if not exists pgcrypto;
+create table if not exists profiles(id uuid primary key references auth.users on delete cascade, full_name text,
+  role text not null default 'dispatch' check (role in ('md','ceo','marketing','factory_manager','planning','dispatch')), created_at timestamptz default now());
+create or replace function my_role() returns text language sql stable security definer set search_path=public as $$ select role from profiles where id=auth.uid() $$;
+create or replace function is_full() returns boolean language sql stable as $$ select coalesce(my_role() in ('md','ceo'),false) $$;
+create or replace function can_edit() returns boolean language sql stable as $$ select coalesce(my_role() in ('md','ceo','marketing'),false) $$;
+create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$
+begin insert into profiles(id,full_name) values(new.id,split_part(new.email,'@',1)); return new; end $$;
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users for each row execute function handle_new_user();
+
+create table if not exists customers(id uuid primary key default gen_random_uuid(), name text not null, mobile text not null, city text, segment text, gstin text, contact text, created_by uuid default auth.uid(), created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists enquiries(id uuid primary key default gen_random_uuid(), enq_no text unique not null, customer_id uuid references customers, product text, qty numeric, value numeric, owner text not null,
+  stage text default 'New', next_action text not null check (length(trim(next_action))>0), due_date date not null,
+  sales_status text, artwork_status text, order_status text, payment_status text, created_by uuid default auth.uid(), created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists specs(id uuid primary key default gen_random_uuid(), enquiry_id uuid references enquiries on delete cascade, structure text, pouch_type text, width_mm text, length_mm text, thickness_mic text, colours text, print_type text, special text, feasibility text, feas_remarks text, created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists costings(id uuid primary key default gen_random_uuid(), enquiry_id uuid references enquiries on delete cascade, material numeric, conversion numeric, cylinder numeric, freight numeric, overheads numeric, margin_pct numeric, cost_per_kg numeric, price_per_kg numeric, created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists quotations(id uuid primary key default gen_random_uuid(), enquiry_id uuid references enquiries on delete cascade, revision int not null, price_per_kg numeric, qty text, validity text, terms text, margin_pct numeric, needs_approval boolean default false, approved boolean default false, approved_by text, created_at timestamptz default now(), updated_at timestamptz default now(), unique(enquiry_id,revision));
+create table if not exists activities(id uuid primary key default gen_random_uuid(), enquiry_id uuid references enquiries on delete cascade, type text, notes text, next_action text, due_date date, by text, created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists tasks(id uuid primary key default gen_random_uuid(), enquiry_id uuid references enquiries on delete cascade, title text, owner text, due_date date, done boolean default false, created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists audit_log(id bigserial primary key, action text, table_name text, record_id text, detail text, user_email text, user_id uuid default auth.uid(), created_at timestamptz default now());
+
+alter table profiles enable row level security;
+create policy p_self on profiles for select using (id=auth.uid() or is_full());
+create policy p_admin on profiles for update using (is_full());
+-- Shared CRM data: all signed-in roles read; md/ceo/marketing write. No deletes (history preserved).
+do $$ declare t text; begin foreach t in array array['customers','enquiries','specs','activities','tasks'] loop
+ execute format('alter table %I enable row level security',t);
+ execute format('create policy r_%1$s on %1$I for select using (auth.uid() is not null)',t);
+ execute format('create policy i_%1$s on %1$I for insert with check (can_edit())',t);
+ execute format('create policy u_%1$s on %1$I for update using (can_edit())',t);
+end loop; end $$;
+-- Costing: md/ceo/marketing only; view-only roles cannot see.
+alter table costings enable row level security;
+create policy r_cost on costings for select using (can_edit());
+create policy i_cost on costings for insert with check (can_edit());
+-- Quotations: all read (price), insert by editors; only md/ceo can update (approve). Old revisions are never updated/deleted.
+alter table quotations enable row level security;
+create policy r_q on quotations for select using (auth.uid() is not null);
+create policy i_q on quotations for insert with check (can_edit() and approved=false);
+create policy u_q on quotations for update using (is_full());
+-- Hide margin columns from view-only roles/marketing via a safe view is recommended for Phase 2; see README.
+alter table audit_log enable row level security;
+create policy i_a on audit_log for insert with check (auth.uid() is not null);
+create policy r_a on audit_log for select using (is_full());
+
+-- Sample data (clearly labelled)
+insert into customers(id,name,mobile,city,segment) values
+ ('00000000-0000-0000-0000-000000000c01','[SAMPLE] Sri Murugan Foods','9840000001','Chennai','Snacks'),
+ ('00000000-0000-0000-0000-000000000c02','[SAMPLE] Kaveri Spices','9840000002','Erode','Spices') on conflict do nothing;
+insert into enquiries(enq_no,customer_id,product,qty,value,owner,stage,next_action,due_date,sales_status,artwork_status,order_status,payment_status) values
+ ('ENQ-2026-0001','00000000-0000-0000-0000-000000000c01','[SAMPLE] Chips pouch 3-layer',50000,350000,'ravi','Quotation','Call for feedback',current_date-2,'Open','Pending','-','-'),
+ ('ENQ-2026-0002','00000000-0000-0000-0000-000000000c02','[SAMPLE] Masala stand-up pouch',20000,180000,'priya','Feasibility','Share spec',current_date,'Open','Pending','-','-') on conflict do nothing;
+-- After creating users in Auth: update profiles set role='md' where id=(select id from auth.users where email='md@yourco.com');
