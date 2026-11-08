@@ -6,7 +6,7 @@ const DEMO_USERS=[
  {id:'u-costing',email:'costing@dppl.demo',pw:'cost123',role:'costing',name:'Costing'},
  {id:'u-factory',email:'factory@dppl.demo',pw:'view123',role:'factory_manager',name:'Factory Manager'},{id:'u-planning',email:'planning@dppl.demo',pw:'view123',role:'planning',name:'Planning'},{id:'u-dispatch',email:'dispatch@dppl.demo',pw:'view123',role:'dispatch',name:'Dispatch'}];
 window.DEMO_USERS=DEMO_USERS;
-const ROLE={hr_admin:{sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin:1,admin_view:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1,coll:1},md:{sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin_view:1,coll:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},ceo:{sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin_view:1,coll:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},marketing:{sku:1,sample:1,artwork:1,order:1,complaint:1,ops:1,coll:1,edit:1,cost:1,spec:1,costedit:1,cust:1,visit:1,inc_own:1},costing:{sample:1,ops:1,cost:1,margin:1,spec:1,costedit:1},factory_manager:{sample:1,cmp_resolve:1,stage:1,ops:1},planning:{stage:1,ops:1},dispatch:{stage:1,dispatch:1,sample:1,ops:1}};
+const ROLE={hr_admin:{sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin:1,admin_view:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1,coll:1},md:{sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin_view:1,coll:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},ceo:{sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin_view:1,coll:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},marketing:{sku:1,sample:1,artwork:1,order:1,complaint:1,ops:1,coll:1,edit:1,spec:1,cust:1,visit:1,inc_own:1},costing:{sample:1,ops:1,cost:1,margin:1,spec:1,costedit:1},factory_manager:{sample:1,cmp_resolve:1,stage:1,ops:1},planning:{stage:1,ops:1},dispatch:{stage:1,dispatch:1,sample:1,ops:1}};
 window.can=(u,p)=>!!(u&&(ROLE[u.role]||{})[p]);
 const TABLES=['skus','samples','artworks','orders','order_stages','dispatches','complaints','customers','enquiries','specs','costings','quotations','activities','tasks','audit_log'];
 const cfg=window.DPPL_CONFIG||{};
@@ -23,11 +23,18 @@ const LS={
   async user(){return JSON.parse(localStorage.getItem('dppl_user')||'null')}
 };
 LS.remove=async function(t,id){this._s(t,this._g(t).filter(x=>x.id!==id))};
+const SPLIT={costings:{t:'costing_margins',fk:'costing_id'},quotations:{t:'quotation_margins',fk:'quotation_id'}};
+const nul=r=>{const o={};for(const k in r){if(k==='po_file_data'||k==='demo_pw')continue;o[k]=r[k]===''?null:r[k]}return o};
 const SB={
   async remove(t,id){const{error}=await sb.from(t).delete().eq('id',id);if(error)throw error},
-  async list(t){const{data,error}=await sb.from(t).select('*');if(error){console.warn(t,error.message);return[]}return data},
-  async insert(t,r){const{data,error}=await sb.from(t).insert(r).select().single();if(error)throw error;return data},
-  async update(t,id,p){const{data,error}=await sb.from(t).update({...p,updated_at:new Date().toISOString()}).eq('id',id).select().single();if(error)throw error;return data},
+  async list(t){if(t==='incentive_lines'){const{data,error}=await sb.rpc('incentive_lines');if(error){console.warn(error.message);return[]}return data}
+    const{data,error}=await sb.from(t).select('*');if(error){console.warn(t,error.message);return[]}
+    if(SPLIT[t]){const s=SPLIT[t],{data:m}=await sb.from(s.t).select('*');const mp=Object.fromEntries((m||[]).map(x=>[x[s.fk],x.margin_pct]));data.forEach(r=>r.margin_pct=mp[r.id]??null)}return data},
+  async insert(t,r){r=nul(r);const mg=r.margin_pct;delete r.margin_pct;if(t==='quotations'){delete r.needs_approval;delete r.revision;delete r.approved}
+    const{data,error}=await sb.from(t).insert(r).select().single();if(error)throw error;
+    if(t==='costings'&&mg!=null){await sb.from('costing_margins').insert({costing_id:data.id,margin_pct:mg})}return data},
+  async update(t,id,p){p=nul(p);delete p.margin_pct;const{data,error}=await sb.from(t).update({...p,updated_at:new Date().toISOString()}).eq('id',id).select().single();if(error)throw error;return data},
+  async invite(body){const{data,error}=await sb.functions.invoke('invite-user',{body});if(error)throw error;if(data&&data.error)throw new Error(data.error);return data},
   async login(email,pw){const{error}=await sb.auth.signInWithPassword({email,password:pw});if(error)throw error;return this.user()},
   async logout(){await sb.auth.signOut()},
   async user(){const{data}=await sb.auth.getUser();if(!data.user)return null;const{data:p}=await sb.from('profiles').select('*').eq('id',data.user.id).single();if(p&&p.active===false){await sb.auth.signOut();throw new Error('This user is deactivated')}return{email:data.user.email,id:data.user.id,role:p?.role||'dispatch',name:p?.full_name||data.user.email}}
