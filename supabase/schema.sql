@@ -82,3 +82,44 @@ create policy w_inc on incentive_rules for all using (is_full()) with check (is_
 insert into incentive_rules(name,min_qty,min_value,margin_from,margin_to,pct)
  select * from (values ('[PLACEHOLDER] Slab A',10000,100000,12,18,0.5),('[PLACEHOLDER] Slab B',10000,100000,18,25,1.0),('[PLACEHOLDER] Slab C',25000,250000,25,100,1.5)) v
  where not exists (select 1 from incentive_rules);
+
+-- ===== Phase 1.2: HR Admin, setup, collections (safe to re-run) =====
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('hr_admin','md','ceo','marketing','costing','factory_manager','planning','dispatch'));
+alter table profiles add column if not exists email text, add column if not exists emp_code text, add column if not exists mobile text, add column if not exists territory text,
+  add column if not exists reporting_manager text, add column if not exists active boolean default true, add column if not exists updated_at timestamptz default now();
+update profiles p set email=u.email from auth.users u where u.id=p.id and p.email is null;
+create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$
+begin insert into profiles(id,full_name,email) values(new.id,split_part(new.email,'@',1),new.email); return new; end $$;
+create or replace function is_admin() returns boolean language sql stable as $$ select coalesce(my_role()='hr_admin',false) $$;
+create or replace function is_full() returns boolean language sql stable as $$ select coalesce(my_role() in ('hr_admin','md','ceo'),false) $$;
+create or replace function can_edit() returns boolean language sql stable as $$ select coalesce(my_role() in ('hr_admin','md','ceo','marketing'),false) $$;
+create or replace function is_marketing() returns boolean language sql stable as $$ select coalesce(my_role() in ('hr_admin','md','ceo','marketing'),false) $$;
+create or replace function can_cost() returns boolean language sql stable as $$ select coalesce(my_role() in ('hr_admin','md','ceo','marketing','costing'),false) $$;
+-- profiles: everyone reads own; hr_admin/md/ceo read all; only hr_admin changes roles/details
+drop policy if exists p_admin on profiles; create policy p_admin on profiles for update using (is_admin()) with check (is_admin());
+-- incentive rules & settings: hr_admin plus md/ceo (is_full) may edit incentive rules; settings/targets/invoices: hr_admin only
+create table if not exists settings(id uuid primary key default gen_random_uuid(), min_new_customer_visits_per_month numeric, min_new_customers_per_3_months numeric, min_visits_per_day numeric, at_risk_days_left numeric, margin_min_pct numeric, skip_sundays boolean default true, holidays text[] default '{}', visit_purposes text[], created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists targets(id uuid primary key default gen_random_uuid(), exec text not null, period text not null, sales_value numeric, qty numeric, new_customers numeric, new_cust_visits numeric, collections numeric, created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists invoices(id uuid primary key default gen_random_uuid(), invoice_no text not null, customer_id uuid references customers, amount numeric not null, invoice_date date, due_date date not null, promised_date date, exec text, created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists collections(id uuid primary key default gen_random_uuid(), invoice_id uuid references invoices on delete cascade, amount numeric not null, date date not null, ref text, by text, created_by uuid default auth.uid(), created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists invoice_followups(id uuid primary key default gen_random_uuid(), invoice_id uuid references invoices on delete cascade, notes text not null, promised_date date, by text, created_by uuid default auth.uid(), created_at timestamptz default now(), updated_at timestamptz default now());
+do $$ declare t text; begin foreach t in array array['settings','targets','invoices','collections','invoice_followups'] loop
+ execute format('alter table %I enable row level security',t);
+ execute format('drop policy if exists r_%1$s on %1$I',t); execute format('drop policy if exists w_%1$s on %1$I',t);
+ execute format('create policy r_%1$s on %1$I for select using (auth.uid() is not null)',t);
+ execute format('create policy w_%1$s on %1$I for all using (is_admin()) with check (is_admin())',t);
+end loop; end $$;
+-- the responsible executive (or md/ceo) may log collections & follow-ups and set a promised date
+create policy x_coll on collections for insert with check (is_marketing());
+create policy x_fu on invoice_followups for insert with check (is_marketing());
+create policy x_inv on invoices for update using (is_marketing());
+-- hr_admin: full write on all other tables (beyond can_edit) incl. deletes
+do $$ declare t text; begin foreach t in array array['customers','enquiries','specs','costings','quotations','activities','tasks','visits','incentive_rules'] loop
+ execute format('drop policy if exists a_%1$s on %1$I',t);
+ execute format('create policy a_%1$s on %1$I for all using (is_admin()) with check (is_admin())',t);
+end loop; end $$;
+drop policy if exists r_a on audit_log; create policy r_a on audit_log for select using (is_full());
+
+-- Template: after creating the real HR Admin login in Supabase Auth, run (replace the placeholder):
+-- update profiles set role='hr_admin' where email = 'HR_ADMIN_EMAIL_PLACEHOLDER';

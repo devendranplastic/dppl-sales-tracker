@@ -4,7 +4,7 @@ const inr=n=>'₹'+Number(n||0).toLocaleString('en-IN');const today=()=>new Date
 const fd=d=>d?new Date(d).toLocaleDateString('en-GB'):'';
 const STAGES=['New','Specification','Feasibility','Costing','Quotation','Negotiation','Won','Lost'];
 let U=null,D={},view='dash',sel=null,filt={};
-async function load(){for(const t of ['customers','enquiries','specs','costings','quotations','activities','tasks','audit_log','visits','incentive_rules'])D[t]=await DB.list(t);D.loadedAt=new Date()}
+async function load(){for(const t of ['customers','enquiries','specs','costings','quotations','activities','tasks','audit_log','visits','incentive_rules','profiles','settings','targets','invoices','collections','invoice_followups'])D[t]=await DB.list(t);D.loadedAt=new Date();if(window.applySettings)applySettings()}
 const cname=id=>(D.customers.find(c=>c.id===id)||{}).name||'';
 const fv=f=>Object.fromEntries(new FormData(f));
 function loginPage(msg){A.innerHTML=`<div class="auth"><img src="assets/dppl_company_logo.png" alt="DPPL - Devendran Plastic Pvt. Ltd."><h2>Sales & Order Tracker</h2>
@@ -15,13 +15,13 @@ $('#lf').onsubmit=async e=>{e.preventDefault();const f=fv(e.target);try{U=await 
 function outPage(){A.innerHTML=`<div class="auth"><img src="assets/bala_hr_logo.png" alt="Bala HR" style="max-width:240px"><h2>You have signed out</h2><p>Thank you for using the DPPL Sales & Order Tracker.</p><button onclick="loginPage()">Sign in again</button></div>`}
 window.loginPage=loginPage;
 async function start(){await load();render()}
-function shell(body){const tabs=[['dash','Dashboard'],['tasks','Tasks'],['enq','Enquiries'],['cust','Customers'],...(can(U,'visit')||can(U,'full')?[['visits','Visits']]:[]),...(can(U,'inc_all')||can(U,'inc_own')?[['inc','Incentives']]:[]),...(can(U,'full')?[['audit','Audit log']]:[])];
+function shell(body){const tabs=[['dash','Dashboard'],['tasks','Tasks'],['enq','Enquiries'],['cust','Customers'],...(can(U,'visit')||can(U,'full')?[['visits','Visits']]:[]),...(can(U,'inc_all')||can(U,'inc_own')?[['inc','Incentives']]:[]),...(window.extraTabs?extraTabs():[]),...(can(U,'full')?[['audit','Audit log']]:[])];
 A.innerHTML=`<header><img src="assets/dppl_company_logo.png" alt="DPPL"><b style="color:var(--navy)">Sales & Order Tracker</b><span class="sp"></span><small>${esc(U.name)} · ${U.role} · ${DB.mode}${can(U,'edit')?'':' · view only'}</small><button class="lt" id="lo">Logout</button></header>
 <nav>${tabs.map(([k,l])=>`<a href="#" data-v="${k}" class="${view===k?'on':''}">${l}</a>`).join('')}</nav><main>${body}<p><small>Last updated: ${D.loadedAt.toLocaleString('en-GB')}</small></p></main>`;
 document.querySelectorAll('nav a').forEach(a=>a.onclick=e=>{e.preventDefault();view=a.dataset.v;sel=null;render()});
 $('#lo').onclick=async()=>{await audit('logout','auth',null);await DB.logout();U=null;outPage()}}
 const visible=()=>D.enquiries.filter(e=>U.role!=='marketing'||true); // marketing sees own + team (whole marketing team)
-function render(){const fn={visits:visitsV,inc:incV,dash,tasks,enq,cust,audit:auditV,detail}[view];shell(fn());(window['bind_'+view]||(()=>{}))()}
+function render(){const fn={...(window.VIEWS||{}),visits:visitsV,inc:incV,dash,tasks,enq,cust,audit:auditV,detail}[view];shell(fn());(window['bind_'+view]||(()=>{}))()}
 // Dashboard
 function dash(){let E=visible();const ex=[...new Set(D.enquiries.map(e=>e.owner))],cs=D.customers,ms=[...new Set(D.enquiries.map(e=>(e.created_at||'').slice(0,7)))];
  if(filt.owner)E=E.filter(e=>e.owner===filt.owner);if(filt.cust)E=E.filter(e=>e.customer_id===filt.cust);if(filt.month)E=E.filter(e=>(e.created_at||'').startsWith(filt.month));
@@ -95,10 +95,10 @@ const CF=window.DPPL_CONFIG||{};const ymd=d=>d.toISOString().slice(0,10);
 const isNewCust=v=>v.customer_type==='New';
 function execs(){const s=new Set(D.enquiries.map(e=>e.owner).concat(D.visits.map(v=>v.by)));if(DB.mode!=='Supabase')DEMO_USERS.filter(u=>u.role==='marketing').forEach(u=>s.add(u.name));return [...s].filter(Boolean)}
 function compliance(x){const now=new Date(),t=ymd(now),y=ymd(new Date(Date.now()-864e5)),V=D.visits.filter(v=>v.by===x);
- const daily=V.some(v=>v.date===t)?'met':V.some(v=>v.date===y)?'at risk':'missed';
+ const y2=window.prevWorkDay?prevWorkDay():y,mn=+CF.MIN_VISITS_PER_DAY||1,daily=V.filter(v=>v.date===t).length>=mn||(window.workToday&&!workToday()&&V.some(v=>v.date===y2))?'met':V.some(v=>v.date===y2)?'at risk':'missed';
  const mStart=t.slice(0,8)+'01',pm=new Date(now.getFullYear(),now.getMonth()-1,1),pmS=ymd(new Date(pm.getTime()-pm.getTimezoneOffset()*6e4)).slice(0,7);
  const nv=V.filter(v=>isNewCust(v)&&v.date>=mStart).length,nvPrev=V.filter(v=>isNewCust(v)&&(v.date||'').startsWith(pmS)).length;
- const daysLeft=new Date(now.getFullYear(),now.getMonth()+1,0).getDate()-now.getDate(),need=CF.MIN_NEW_CUSTOMER_VISITS_PER_MONTH||1;
+ const daysLeft=new Date(now.getFullYear(),now.getMonth()+1,0).getDate()-now.getDate(),need=(window.tgt?tgt(x,t.slice(0,7),'new_cust_visits'):null)??CF.MIN_NEW_CUSTOMER_VISITS_PER_MONTH??1;
  const monthly=nv>=need?'met':daysLeft<=(CF.AT_RISK_DAYS_LEFT||7)?'at risk':(nvPrev<need?'missed':'at risk');
  const c3=ymd(new Date(Date.now()-91*864e5)),C=D.customers.filter(c=>c.created_by_name===x),nc=C.filter(c=>(c.created_at||'')>=c3).length;
  const needC=CF.MIN_NEW_CUSTOMERS_PER_3_MONTHS||1,soon=ymd(new Date(Date.now()-(91-(CF.AT_RISK_DAYS_LEFT||7))*864e5)),ncSoon=C.filter(c=>(c.created_at||'')>=soon).length;
@@ -111,7 +111,7 @@ ${filt.x?(()=>{const c=compliance(filt.x);return `<h3>Drill-down: ${esc(filt.x)}
 function visitsV(){const mine=can(U,'full')?D.visits:D.visits.filter(v=>v.by===U.name);
  return `${can(U,'visit')?`<div class="card"><h2>Log today's visit</h2><form id="vf" class="grid"><div><label>Date*</label><input type="date" name="date" value="${today()}" required></div>
  <div><label>Customer*</label><input name="customer_name" list="cl" required><datalist id="cl">${D.customers.map(c=>`<option>${esc(c.name)}`).join('')}</datalist></div>
- <div><label>Customer type*</label><select name="customer_type"><option>Existing<option>New</select></div><div><label>Purpose*</label><select name="purpose"><option>New business<option>Quotation follow-up<option>Sample / artwork<option>Payment follow-up<option>Complaint<option>Relationship</select></div>
+ <div><label>Customer type*</label><select name="customer_type"><option>Existing<option>New</select></div><div><label>Purpose*</label><select name="purpose">${(CF.VISIT_PURPOSES||['New business','Quotation follow-up','Payment follow-up']).map(p=>`<option>${esc(p)}`).join('')}</select></div>
  <div><label>Discussion*</label><input name="discussion" required></div><div><label>Next action*</label><input name="next_action" required></div><div><button>Save visit</button></div></form></div>`:''}
  <div class="card tw"><h2>${can(U,'full')?'All visits':'My visits'}</h2><table><tr><th>Date</th><th>By</th><th>Customer</th><th>Type</th><th>Purpose</th><th>Discussion</th><th>Next action</th></tr>${mine.slice().sort((a,b)=>b.date>a.date?1:-1).map(v=>`<tr><td>${fd(v.date)}</td><td>${esc(v.by)}</td><td>${esc(v.customer_name)}</td><td>${esc(v.customer_type)}</td><td>${esc(v.purpose)}</td><td>${esc(v.discussion)}</td><td>${esc(v.next_action)}</td></tr>`).join('')}</table></div>`}
 window.bind_visits=()=>{const f=$('#vf');if(f)f.onsubmit=async e=>{e.preventDefault();const v=fv(f);v.by=U.name;const r=await DB.insert('visits',v);await audit('insert','visits',r.id,v);await load();render()}};
@@ -129,4 +129,4 @@ window.bind_inc=()=>{const go=async()=>{await load();render()};const ad=$('#addr
  ad.onclick=async()=>{await DB.insert('incentive_rules',{name:'New slab',min_qty:0,min_value:0,margin_from:0,margin_to:100,pct:0});await audit('insert','incentive_rules');go()};
  document.querySelectorAll('[data-sv]').forEach(b=>b.onclick=async()=>{const tr=b.closest('tr'),v={};tr.querySelectorAll('input').forEach(i=>v[i.name]=i.name==='name'?i.value:+i.value);await DB.update('incentive_rules',b.dataset.sv,v);await audit('update','incentive_rules',b.dataset.sv,v);go()});
  document.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{await DB.remove('incentive_rules',b.dataset.del);await audit('delete','incentive_rules',b.dataset.del);go()})};
-(async()=>{U=await DB.user();U?start():loginPage()})();
+

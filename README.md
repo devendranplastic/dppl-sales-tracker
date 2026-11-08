@@ -11,3 +11,9 @@ MD/CEO: full, margins, approvals, audit log. Marketing: edit, sees costing cost/
 - Costing role (costing@dppl.demo / cost123): edits costing + feasibility, sees margins, cannot issue/approve quotes or edit customers/enquiries.
 - Incentives tab: marketing sees own; MD/CEO see all and edit slabs ([PLACEHOLDER] slabs seeded). First matching slab (min qty, min value, margin band) × incentive % of won value.
 - Supabase: re-run supabase/schema.sql (the Phase 1.1 section is idempotent).
+## Phase 1.2 — HR Admin
+- Role `hr_admin` (demo: admin@dppl.demo / admin123): system admin, all data and configuration. MD/CEO can view Setup read-only.
+- Setup tab: Users & employees (role, emp code, mobile, territory, reporting manager, activate/deactivate), Targets (per exec per month YYYY-MM or quarter YYYY-Qn), Visit settings (purposes, skip Sundays, holidays, min visits/day, discipline thresholds, margin limit). config.js values are defaults only.
+- Collections tab: invoices, responsible exec, due/promised dates, follow-ups, collections, ageing.
+- Analysis tab: target vs achievement, pipeline, ageing, incentive summary; filter by period/executive.
+- Supabase: users are created in the Supabase dashboard (Authentication → Add user / Invite); they then appear in Setup → Users. To make the real HR Admin, run the commented template at the end of schema.sql with their email (never commit it).
