@@ -53,3 +53,32 @@ insert into enquiries(enq_no,customer_id,product,qty,value,owner,stage,next_acti
  ('ENQ-2026-0001','00000000-0000-0000-0000-000000000c01','[SAMPLE] Chips pouch 3-layer',50000,350000,'ravi','Quotation','Call for feedback',current_date-2,'Open','Pending','-','-'),
  ('ENQ-2026-0002','00000000-0000-0000-0000-000000000c02','[SAMPLE] Masala stand-up pouch',20000,180000,'priya','Feasibility','Share spec',current_date,'Open','Pending','-','-') on conflict do nothing;
 -- After creating users in Auth: update profiles set role='md' where id=(select id from auth.users where email='md@yourco.com');
+
+-- ===== Phase 1.1: costing role, visits, incentives (safe to re-run) =====
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('md','ceo','marketing','costing','factory_manager','planning','dispatch'));
+alter table customers add column if not exists created_by_name text;
+create or replace function is_marketing() returns boolean language sql stable as $$ select coalesce(my_role() in ('md','ceo','marketing'),false) $$;
+create or replace function can_cost() returns boolean language sql stable as $$ select coalesce(my_role() in ('md','ceo','marketing','costing'),false) $$;
+-- customers/enquiries/activities/tasks: costing cannot write (can_edit() = md/ceo/marketing, unchanged)
+-- specs (feasibility): costing may write
+drop policy if exists i_specs on specs; drop policy if exists u_specs on specs;
+create policy i_specs on specs for insert with check (can_cost());
+create policy u_specs on specs for update using (can_cost());
+-- costings: md/ceo/marketing/costing read & write
+drop policy if exists r_cost on costings; drop policy if exists i_cost on costings;
+create policy r_cost on costings for select using (can_cost());
+create policy i_cost on costings for insert with check (can_cost());
+-- quotations: costing may read, cannot issue or approve (approve = is_full only)
+create table if not exists visits(id uuid primary key default gen_random_uuid(), date date not null default current_date, customer_name text not null, customer_type text check (customer_type in ('New','Existing')), purpose text, discussion text not null, next_action text not null, by text, created_by uuid default auth.uid(), created_at timestamptz default now(), updated_at timestamptz default now());
+alter table visits enable row level security;
+create policy r_vis on visits for select using (is_full() or my_role()='marketing');
+create policy i_vis on visits for insert with check (is_marketing());
+create policy u_vis on visits for update using (created_by=auth.uid() or is_full());
+create table if not exists incentive_rules(id uuid primary key default gen_random_uuid(), name text, min_qty numeric default 0, min_value numeric default 0, margin_from numeric default 0, margin_to numeric default 100, pct numeric default 0, created_at timestamptz default now(), updated_at timestamptz default now());
+alter table incentive_rules enable row level security;
+create policy r_inc on incentive_rules for select using (is_marketing());
+create policy w_inc on incentive_rules for all using (is_full()) with check (is_full());
+insert into incentive_rules(name,min_qty,min_value,margin_from,margin_to,pct)
+ select * from (values ('[PLACEHOLDER] Slab A',10000,100000,12,18,0.5),('[PLACEHOLDER] Slab B',10000,100000,18,25,1.0),('[PLACEHOLDER] Slab C',25000,250000,25,100,1.5)) v
+ where not exists (select 1 from incentive_rules);

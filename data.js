@@ -2,9 +2,10 @@
 const DEMO_USERS=[
  {email:'md@dppl.demo',pw:'md123',role:'md',name:'MD'},{email:'ceo@dppl.demo',pw:'ceo123',role:'ceo',name:'CEO'},
  {email:'ravi@dppl.demo',pw:'mkt123',role:'marketing',name:'ravi'},{email:'priya@dppl.demo',pw:'mkt123',role:'marketing',name:'priya'},
+ {email:'costing@dppl.demo',pw:'cost123',role:'costing',name:'Costing'},
  {email:'factory@dppl.demo',pw:'view123',role:'factory_manager',name:'Factory Manager'},{email:'planning@dppl.demo',pw:'view123',role:'planning',name:'Planning'},{email:'dispatch@dppl.demo',pw:'view123',role:'dispatch',name:'Dispatch'}];
 window.DEMO_USERS=DEMO_USERS;
-const ROLE={md:{full:1,edit:1,cost:1,margin:1,approve:1},ceo:{full:1,edit:1,cost:1,margin:1,approve:1},marketing:{edit:1,cost:1},factory_manager:{},planning:{},dispatch:{}};
+const ROLE={md:{full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},ceo:{full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},marketing:{edit:1,cost:1,spec:1,costedit:1,cust:1,visit:1,inc_own:1},costing:{cost:1,margin:1,spec:1,costedit:1},factory_manager:{},planning:{},dispatch:{}};
 window.can=(u,p)=>!!(u&&(ROLE[u.role]||{})[p]);
 const TABLES=['customers','enquiries','specs','costings','quotations','activities','tasks','audit_log'];
 const cfg=window.DPPL_CONFIG||{};
@@ -20,7 +21,9 @@ const LS={
   async logout(){localStorage.removeItem('dppl_user')},
   async user(){return JSON.parse(localStorage.getItem('dppl_user')||'null')}
 };
+LS.remove=async function(t,id){this._s(t,this._g(t).filter(x=>x.id!==id))};
 const SB={
+  async remove(t,id){const{error}=await sb.from(t).delete().eq('id',id);if(error)throw error},
   async list(t){const{data,error}=await sb.from(t).select('*');if(error){console.warn(t,error.message);return[]}return data},
   async insert(t,r){const{data,error}=await sb.from(t).insert(r).select().single();if(error)throw error;return data},
   async update(t,id,p){const{data,error}=await sb.from(t).update({...p,updated_at:new Date().toISOString()}).eq('id',id).select().single();if(error)throw error;return data},
@@ -37,5 +40,10 @@ function seed(){if(useSB||localStorage.getItem('dppl_seeded'))return;const d=n=>
  {id:'e2',enq_no:'ENQ-2026-0002',customer_id:'c2',owner:'priya',product:'Masala stand-up pouch',qty:20000,value:180000,stage:'Feasibility',next_action:'Share spec',due_date:d(0),created_at:new Date(Date.now()-5*864e5).toISOString(),sales_status:'Open',artwork_status:'Pending',order_status:'-',payment_status:'-'}];
  localStorage.setItem('dppl_customers',JSON.stringify(c));localStorage.setItem('dppl_enquiries',JSON.stringify(e));
  localStorage.setItem('dppl_tasks',JSON.stringify([{id:'t1',enquiry_id:'e1',title:'[SAMPLE] Follow up quotation',owner:'ravi',due_date:d(-2),done:false}]));
+ localStorage.setItem('dppl_visits',JSON.stringify([{id:'v1',date:d(-1),customer_name:'[SAMPLE] Sri Murugan Foods',customer_type:'Existing',purpose:'Quotation follow-up',discussion:'Asked for price revision',next_action:'Send R1',by:'ravi',created_at:new Date().toISOString()}]));
  localStorage.setItem('dppl_seeded','1')}
+if(!useSB&&!localStorage.getItem('dppl_incentive_rules'))localStorage.setItem('dppl_incentive_rules',JSON.stringify([
+ {id:'r1',name:'[PLACEHOLDER] Slab A',min_qty:10000,min_value:100000,margin_from:12,margin_to:18,pct:0.5},
+ {id:'r2',name:'[PLACEHOLDER] Slab B',min_qty:10000,min_value:100000,margin_from:18,margin_to:25,pct:1},
+ {id:'r3',name:'[PLACEHOLDER] Slab C',min_qty:25000,min_value:250000,margin_from:25,margin_to:100,pct:1.5}]));
 seed();
