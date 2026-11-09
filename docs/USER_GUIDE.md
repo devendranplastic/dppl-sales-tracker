@@ -17,7 +17,7 @@ The app opens in the phone or desktop browser. On a phone, use the browser's **A
 3. The menu bar shows only the screens your role is allowed to use. The **🔔 bell** shows messages from the MD or HR Admin.
 4. Use **Logout** (top right) on shared computers.
 
-> **Demo mode.** Until the database goes live, the site runs as a local demo in your browser (the header says *Local demo*). Data typed in demo mode stays on that browser only. Demo logins: hr@dppl.demo / admin123, md@dppl.demo / md123, nathan@ · jesaon@ · suresh@ · balaji@dppl.demo / mkt123, info@dppl.demo / info123, ramesh@dppl.demo / acc123, costing@dppl.demo / cost123, planning@ · factory@ · dispatch@dppl.demo / view123.
+> **Live since 9 November 2026.** The live site uses the real company database: sign in only with your @devendranplastic.com account. (A local demo mode with sample logins exists for training copies where `USE_SUPABASE` is false; header shows *Local demo* there. Demo logins do **not** work on the live site.)
 
 ### Who's who
 

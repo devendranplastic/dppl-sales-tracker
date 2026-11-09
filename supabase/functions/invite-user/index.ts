@@ -1,7 +1,7 @@
 // Supabase Edge Function: HR Admin invites / creates a user and sets their role.
 // Deploy:  supabase functions deploy invite-user
 // Secrets: SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are injected automatically by Supabase.
-// Optional: supabase secrets set SITE_URL=https://popkalis-nandu.github.io/dppl-sales-tracker/
+// Optional: supabase secrets set SITE_URL=https://devendranplastic.github.io/dppl-sales-tracker/
 import { createClient } from "npm:@supabase/supabase-js@2";
 const ROLES = ["hr_admin","md","ceo","marketing","costing","factory_manager","planning","dispatch","accounts","data_entry"];
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };

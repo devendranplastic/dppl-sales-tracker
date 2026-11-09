@@ -1,6 +1,6 @@
 // Supabase project (publishable key is public by design; security is enforced by RLS in the database).
 // Set USE_SUPABASE: true only AFTER supabase/setup_all.sql has been run and users are created. false = local demo mode.
-window.DPPL_CONFIG = { USE_SUPABASE: false,
+window.DPPL_CONFIG = { USE_SUPABASE: true,
   SUPABASE_URL: "https://ehwgyqnqpcknzecjrgdl.supabase.co",
   SUPABASE_ANON_KEY: "sb_publishable_LppOa3TcG9FroOpN-7XtJw_CQftI3jR", MARGIN_MIN_PCT: 12,
   // Marketing discipline rules

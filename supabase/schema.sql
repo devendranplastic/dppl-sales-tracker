@@ -404,10 +404,7 @@ grant usage, select on all sequences in schema public to authenticated;
 grant execute on all functions in schema public to authenticated;
 revoke all on doc_counters from authenticated;
 
--- ---------- sample data (clearly labelled) — delete when going live
-insert into customers(id,name,mobile,city,segment) values
- ('00000000-0000-0000-0000-000000000c01','[SAMPLE] Sri Murugan Foods','9840000001','Chennai','Snacks'),
- ('00000000-0000-0000-0000-000000000c02','[SAMPLE] Kaveri Spices','9840000002','Erode','Spices') on conflict do nothing;
+-- ---------- defaults (no sample business data: the live DB starts clean; test fixtures live in supabase/test/rls_test.sql)
 insert into incentive_rules(name,min_qty,min_value,margin_from,margin_to,pct)
  select * from (values ('[PLACEHOLDER] Slab A',10000,100000,12,18,0.5),('[PLACEHOLDER] Slab B',10000,100000,18,25,1.0),('[PLACEHOLDER] Slab C',25000,250000,25,100,1.5)) v(a,b,c,d,e,f)
  where not exists (select 1 from incentive_rules);

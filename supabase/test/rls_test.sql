@@ -3,6 +3,10 @@
 reset role;
 create or replace function pg_temp.ok(name text, cond boolean) returns text language sql as $$ select (case when cond then 'PASS ' else 'FAIL ' end)||name $$;
 create or replace function pg_temp.fails(name text, stmt text) returns text language plpgsql as $$ begin execute stmt; return 'FAIL '||name||' (was allowed)'; exception when others then return 'PASS '||name||' ('||left(sqlerrm,60)||')'; end $$;
+-- test fixtures (formerly sample rows in schema.sql)
+insert into customers(id,name,mobile,city,segment) values
+ ('00000000-0000-0000-0000-000000000c01','[SAMPLE] Sri Murugan Foods','9840000001','Chennai','Snacks'),
+ ('00000000-0000-0000-0000-000000000c02','[SAMPLE] Kaveri Spices','9840000002','Erode','Spices') on conflict do nothing;
 delete from auth.users where email like '%@rls.test';
 insert into auth.users(id,email) values
  ('a0000000-0000-0000-0000-000000000001','admin@rls.test'),('a0000000-0000-0000-0000-000000000002','md@rls.test'),
