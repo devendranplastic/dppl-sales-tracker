@@ -1,0 +1,10 @@
+
+# Android build outputs / caches (APK is distributed separately; keystore lives in /workspace/dppl-crm-keys, never here)
+dist/
+android/build/
+android/vendor-cache/
+*.apk
+*.idsig
+*.jks
+*.keystore
+keystore.properties

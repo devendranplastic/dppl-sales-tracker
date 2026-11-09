@@ -14,7 +14,7 @@ function loginPage(msg){A.innerHTML=`<div class="auth"><img src="assets/dppl_com
 <form id="lf"><label>Email</label><input name="email" type="email" required><label>Password</label><input name="pw" type="password" required><button style="width:100%">Sign in</button></form>
 ${msg?`<p class="bad">${esc(msg)}</p>`:''}<p><small>Mode: ${DB.mode}</small></p>
 ${DB.mode!=='Supabase'?`<div class="card" style="text-align:left;font-size:13px"><b>Demo accounts</b><table>${DEMO_USERS.map(u=>`<tr><td>${u.role}</td><td>${u.email}</td><td>${u.pw}</td></tr>`).join('')}</table></div>`:''}</div>`;
-$('#lf').onsubmit=async e=>{e.preventDefault();const f=fv(e.target);try{U=await DB.login(f.email,f.pw);view='dash';sel=null;await audit('login','auth',null);start()}catch(x){loginPage(x.message)}}}
+$('#lf').onsubmit=async e=>{e.preventDefault();const f=fv(e.target);try{U=await DB.login(f.email,f.pw);HS.length=0;view='dash';sel=null;await audit('login','auth',null);start()}catch(x){loginPage(x.message)}}}
 function outPage(){A.innerHTML=`<div class="auth"><img src="assets/bala_hr_logo.png" alt="Bala HR" style="max-width:240px"><h2>You have signed out</h2><p>Thank you for using the DPPL Sales & Order Tracker.</p><button onclick="loginPage()">Sign in again</button></div>`}
 window.loginPage=loginPage;
 async function start(){if(U&&U.must_change_password)return pwPage();await load();render()}
@@ -29,7 +29,8 @@ document.querySelectorAll('nav a').forEach(a=>a.onclick=e=>{e.preventDefault();v
 const bl=$('#bell');if(bl)bl.onclick=()=>{view='inbox';sel=null;render()};
 $('#lo').onclick=async()=>{await audit('logout','auth',null);await DB.logout();U=null;outPage()}}
 const visible=()=>D.enquiries.filter(e=>U.role!=='marketing'||true); // marketing sees own + team (whole marketing team)
-function render(){const fn={...(window.VIEWS||{}),visits:visitsV,inc:incV,dash,tasks,enq,cust,audit:auditV,detail}[view];shell(fn());(window['bind_'+view]||(()=>{}))()}
+const HS=[];window.appBack=()=>{if(!U||HS.length<2)return false;HS.pop();const t=HS[HS.length-1];view=t.v;sel=t.s;render(1);return true};
+function render(bk){if(!bk){const t=HS[HS.length-1];if(!t||t.v!==view||t.s!==sel)HS.push({v:view,s:sel});if(HS.length>50)HS.shift()}const fn={...(window.VIEWS||{}),visits:visitsV,inc:incV,dash,tasks,enq,cust,audit:auditV,detail}[view];shell(fn());(window['bind_'+view]||(()=>{}))()}
 // Dashboard
 function dash(){let E=visible();const ex=[...new Set(D.enquiries.map(e=>e.owner_id))],cs=D.customers,ms=[...new Set(D.enquiries.map(e=>(e.created_at||'').slice(0,7)))];
  if(filt.owner_id)E=E.filter(e=>e.owner_id===filt.owner_id);if(filt.cust)E=E.filter(e=>e.customer_id===filt.cust);if(filt.month)E=E.filter(e=>(e.created_at||'').startsWith(filt.month));
