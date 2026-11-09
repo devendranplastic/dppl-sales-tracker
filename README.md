@@ -10,6 +10,13 @@ Dispatch (partial, invoice, transporter, vehicle, LR, POD → invoice in Collect
 Messages (MD/CEO/HR Admin broadcast to all or selected roles; bell with unread count; read receipts; optional WhatsApp/email share — no automatic sending) · Incentives (MD/CEO-editable slabs) · Analysis (target vs achievement) · Setup (users, targets, visit rules) · Import/Export (CSV/Excel for customers, SKUs, orders, invoices) · Audit log.
 Separate statuses on every enquiry: sales · artwork/sample · order · payment. Won date recorded; "Sales won" uses released orders.
 
+## HR Admin data tools
+- **Import data** (HR Admin only): customers, SKU details, past order history, monthly ERP sales — CSV/Excel templates, column mapping, preview with validation (required fields, duplicate code/name/mobile, SKU→customer link), upsert by customer code / customer+SKU code, import log with downloadable rejected rows.
+- **Monthly sales upload**: rows mapped to executives by emp code / email / name / saved alias; unmatched names mapped once (or marked Common). Re-uploading a month replaces it after confirmation.
+  **Sales (ERP)** tab: executive-wise value/qty/customers vs target, Common sales orders separately, company total. Feeds Analysis, dashboard achievement and incentives. Dashboard shows "Sales data last uploaded"; HR Admin gets a reminder after the 5th.
+- **Actual cost** (Costing): monthly actual cost/kg per SKU/product; actual margin = sold/PO price vs latest actual cost (hidden from marketing/view roles). Reminder after the 5th.
+- **Dispatch plan**: Planning enters the daily plan; Dispatch confirms (qty, vehicle, driver/transporter, LR, time, invoice no + invoice copy → private bucket `invoice-files`), creating the dispatch + invoice on the order. Plan vs actual: dispatched / partial / pending / missed. Dashboard flags a missing plan on working days.
+
 ## Roles
 hr_admin (system admin, everything) · md / ceo (all data, approvals, release, setup read-only) · marketing (customers, enquiries, quotes, PO, samples, artwork, complaints; no costing/margins) ·
 costing (costing sheets, feasibility, margins, sample tech approval) · factory_manager / planning / dispatch (read; update only their own production stages; dispatch records dispatches & invoices).
@@ -33,4 +40,4 @@ Invoices/collections/targets/visits: own (and direct reports) for executives, al
 Every write is recorded in `audit_log` by trigger. Deactivated users lose all access.
 
 ## Tests
-- `supabase/setup_all.sql` (one-shot: schema + storage; rebuild with `supabase/build_setup_all.sh`). `supabase/test/local_stubs.sql` + `setup_all.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 46/46 role-switching checks pass (incl. broadcast messages); seed_users.sql verified.
+- `supabase/setup_all.sql` (one-shot: schema + storage; rebuild with `supabase/build_setup_all.sh`). `supabase/test/local_stubs.sql` + `setup_all.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 65/65 role-switching checks pass (incl. messages, ERP sales, actual cost, dispatch plans); seed_users.sql verified.

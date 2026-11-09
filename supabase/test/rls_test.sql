@@ -120,3 +120,47 @@ select pg_temp.ok('non-recipient (planning): sees nothing',(select count(*) from
 reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000002',false); set role authenticated;
 select pg_temp.ok('md sender: read receipts 1/2',(select count(*) filter (where read_at is not null)||'/'||count(*) from message_recipients)='1/2');
 reset role;
+-- ERP sales upload, aliases, import log
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000002',false); set role authenticated;
+select pg_temp.fails('md: cannot upload ERP sales (HR Admin only)',$$insert into sales_uploads(month) values('2026-10')$$);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000001',false); set role authenticated;
+insert into sales_uploads(id,month,rows) values('b0000000-0000-0000-0000-000000000001','2026-10',3);
+insert into sales_lines(upload_id,month,invoice_no,sku,qty,unit,value,exec_id,is_common) values
+ ('b0000000-0000-0000-0000-000000000001','2026-10','E1','RLS-SKU',1000,'kg',200000,'a0000000-0000-0000-0000-000000000003',false),
+ ('b0000000-0000-0000-0000-000000000001','2026-10','E2','RLS-SKU',500,'kg',90000,'a0000000-0000-0000-0000-000000000004',false),
+ ('b0000000-0000-0000-0000-000000000001','2026-10','E3','X',100,'kg',30000,null,true);
+insert into exec_aliases(alias,raw_name,is_common) values('house','HOUSE',true);
+insert into import_logs(kind,file_name,added,updated,rejected) values('customers','old.xlsx',10,2,1);
+select pg_temp.fails('alias must point to exec unless common',$$insert into exec_aliases(alias) values('nobody')$$);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000003',false); set role authenticated;
+select pg_temp.ok('marketing: sees only own sales lines',(select count(*) from sales_lines)=1);
+select pg_temp.fails('marketing: cannot write sales lines',$$insert into sales_lines(upload_id,month,invoice_no,value) values('b0000000-0000-0000-0000-000000000001','2026-10','Z',1)$$);
+select pg_temp.ok('marketing: sees upload month label',(select count(*) from sales_uploads)=1);
+select pg_temp.ok('marketing: import log + aliases hidden',(select count(*) from import_logs)=0 and (select count(*) from exec_aliases)=0);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000002',false); set role authenticated;
+select pg_temp.ok('md: sees all 3 sales lines incl. common',(select count(*) from sales_lines)=3);
+-- actual cost
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000005',false); set role authenticated;
+insert into actual_costs(month,sku_id,material,conversion,cost_per_kg) select '2026-10',id,140,20,160 from skus where sku_code='RLS-SKU';
+select pg_temp.ok('costing: enters actual cost',(select count(*) from actual_costs)=1);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000003',false); set role authenticated;
+select pg_temp.ok('marketing: actual cost hidden',(select count(*) from actual_costs)=0);
+select pg_temp.fails('marketing: cannot enter actual cost',$$insert into actual_costs(month,product,cost_per_kg) values('2026-10','x',1)$$);
+select pg_temp.ok('marketing: own actual-sales incentive, margin hidden',(select count(*)=1 and bool_and(margin_pct is null) from sales_incentives()));
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000002',false); set role authenticated;
+select pg_temp.ok('md: actual margin 25% from actual cost (200/kg vs 160/kg)',(select margin_pct from sales_incentives() where exec_id='a0000000-0000-0000-0000-000000000003')=25);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000006',false); set role authenticated;
+select pg_temp.ok('planning: actual cost hidden',(select count(*) from actual_costs)=0);
+-- dispatch plan
+insert into dispatch_plans(id,date,order_id,planned_qty,priority) select 'c0000000-0000-0000-0000-000000000001',current_date,id,1000,'High' from orders where po_no='PO-RLS';
+select pg_temp.fails('planning: cannot confirm dispatch',$$update dispatch_plans set actual_qty=1000$$);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000007',false); set role authenticated;
+select pg_temp.fails('dispatch: cannot create plan',$$insert into dispatch_plans(date,planned_qty) values(current_date,1)$$);
+select pg_temp.fails('dispatch: cannot change planned qty',$$update dispatch_plans set planned_qty=5$$);
+update dispatch_plans set actual_qty=800, vehicle_no='TN01AB1234', lr_no='LR9', invoice_no='INV-RLS', confirmed_at=now();
+select pg_temp.ok('dispatch: confirmed plan (partial 800/1000)',(select actual_qty from dispatch_plans)=800);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000003',false); set role authenticated;
+select pg_temp.ok('marketing: sees today''s plan',(select count(*) from dispatch_plans)=1);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000005',false); set role authenticated;
+select pg_temp.ok('costing: dispatch plan not visible',(select count(*) from dispatch_plans)=0);
+reset role;

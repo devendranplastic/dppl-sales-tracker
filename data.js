@@ -6,9 +6,9 @@ const DEMO_USERS=[
  {id:'u-costing',email:'costing@dppl.demo',pw:'cost123',role:'costing',name:'Costing'},
  {id:'u-factory',email:'factory@dppl.demo',pw:'view123',role:'factory_manager',name:'Factory Manager'},{id:'u-planning',email:'planning@dppl.demo',pw:'view123',role:'planning',name:'Planning'},{id:'u-dispatch',email:'dispatch@dppl.demo',pw:'view123',role:'dispatch',name:'Dispatch'}];
 window.DEMO_USERS=DEMO_USERS;
-const ROLE={hr_admin:{broadcast:1,sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin:1,admin_view:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1,coll:1},md:{broadcast:1,sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin_view:1,coll:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},ceo:{broadcast:1,sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin_view:1,coll:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},marketing:{sku:1,sample:1,artwork:1,order:1,complaint:1,ops:1,coll:1,edit:1,spec:1,cust:1,visit:1,inc_own:1},costing:{sample:1,ops:1,cost:1,margin:1,spec:1,costedit:1},factory_manager:{sample:1,cmp_resolve:1,stage:1,ops:1},planning:{stage:1,ops:1},dispatch:{stage:1,dispatch:1,sample:1,ops:1}};
+const ROLE={hr_admin:{hist:1,actcost:1,dplan:1,dplan_edit:1,dplan_confirm:1,broadcast:1,sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin:1,admin_view:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1,coll:1},md:{broadcast:1,dplan:1,sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin_view:1,coll:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},ceo:{broadcast:1,dplan:1,sku:1,sample:1,artwork:1,art_lock:1,order:1,release:1,stage_all:1,dispatch:1,complaint:1,cmp_resolve:1,io:1,ops:1,admin_view:1,coll:1,full:1,edit:1,cost:1,margin:1,approve:1,spec:1,costedit:1,cust:1,visit:1,inc_all:1},marketing:{dplan:1,sku:1,sample:1,artwork:1,order:1,complaint:1,ops:1,coll:1,edit:1,spec:1,cust:1,visit:1,inc_own:1},costing:{actcost:1,sample:1,ops:1,cost:1,margin:1,spec:1,costedit:1},factory_manager:{sample:1,cmp_resolve:1,stage:1,ops:1},planning:{dplan:1,dplan_edit:1,stage:1,ops:1},dispatch:{dplan:1,dplan_confirm:1,stage:1,dispatch:1,sample:1,ops:1}};
 window.can=(u,p)=>!!(u&&(ROLE[u.role]||{})[p]);
-const TABLES=['messages','message_recipients','skus','samples','artworks','orders','order_stages','dispatches','complaints','customers','enquiries','specs','costings','quotations','activities','tasks','audit_log'];
+const TABLES=['actual_costs','dispatch_plans','import_logs','customer_history','sales_uploads','sales_lines','exec_aliases','messages','message_recipients','skus','samples','artworks','orders','order_stages','dispatches','complaints','customers','enquiries','specs','costings','quotations','activities','tasks','audit_log'];
 const cfg=window.DPPL_CONFIG||{};
 const useSB=!!(cfg.USE_SUPABASE&&cfg.SUPABASE_URL&&cfg.SUPABASE_ANON_KEY&&window.supabase);
 const sb=useSB?window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY):null;
@@ -23,17 +23,22 @@ const LS={
   async user(){return JSON.parse(localStorage.getItem('dppl_user')||'null')}
 };
 LS.remove=async function(t,id){this._s(t,this._g(t).filter(x=>x.id!==id))};
+LS.insertMany=async function(t,rows){const a=this._g(t),now=new Date().toISOString(),out=rows.map(r=>({id:uid(),created_at:now,updated_at:now,...r}));this._s(t,a.concat(out));return out};
+LS.removeWhere=async function(t,f,v){this._s(t,this._g(t).filter(x=>x[f]!==v))};
 const SPLIT={costings:{t:'costing_margins',fk:'costing_id'},quotations:{t:'quotation_margins',fk:'quotation_id'}};
 const nul=r=>{const o={};for(const k in r){if(k==='po_file_data'||k==='demo_pw')continue;o[k]=r[k]===''?null:r[k]}return o};
 const SB={
   async remove(t,id){const{error}=await sb.from(t).delete().eq('id',id);if(error)throw error},
-  async list(t){if(t==='incentive_lines'){const{data,error}=await sb.rpc('incentive_lines');if(error){console.warn(error.message);return[]}return data}
+  async list(t){if(t==='sales_incentives'){const{data,error}=await sb.rpc('sales_incentives');if(error){console.warn(error.message);return[]}return data}
+    if(t==='incentive_lines'){const{data,error}=await sb.rpc('incentive_lines');if(error){console.warn(error.message);return[]}return data}
     const{data,error}=await sb.from(t).select('*');if(error){console.warn(t,error.message);return[]}
     if(SPLIT[t]){const s=SPLIT[t],{data:m}=await sb.from(s.t).select('*');const mp=Object.fromEntries((m||[]).map(x=>[x[s.fk],x.margin_pct]));data.forEach(r=>r.margin_pct=mp[r.id]??null)}return data},
   async insert(t,r){r=nul(r);const mg=r.margin_pct;delete r.margin_pct;if(t==='quotations'){delete r.needs_approval;delete r.revision;delete r.approved}
     const{data,error}=await sb.from(t).insert(r).select().single();if(error)throw error;
     if(t==='costings'&&mg!=null){await sb.from('costing_margins').insert({costing_id:data.id,margin_pct:mg})}return data},
   async update(t,id,p){p=nul(p);delete p.margin_pct;const{data,error}=await sb.from(t).update({...p,updated_at:new Date().toISOString()}).eq('id',id).select().single();if(error)throw error;return data},
+  async insertMany(t,rows){const out=[];for(let i=0;i<rows.length;i+=500){const{data,error}=await sb.from(t).insert(rows.slice(i,i+500).map(nul)).select();if(error)throw error;out.push(...data)}return out},
+  async removeWhere(t,f,v){const{error}=await sb.from(t).delete().eq(f,v);if(error)throw error},
   async invite(body){const{data,error}=await sb.functions.invoke('invite-user',{body});if(error)throw error;if(data&&data.error)throw new Error(data.error);return data},
   async login(email,pw){const{error}=await sb.auth.signInWithPassword({email,password:pw});if(error)throw error;return this.user()},
   async logout(){await sb.auth.signOut()},

@@ -160,6 +160,38 @@ create or replace function trg_rcpt_guard() returns trigger language plpgsql as 
 begin if (new.message_id,new.user_id) is distinct from (old.message_id,old.user_id) then raise exception 'Only read status can change'; end if; return new; end $$;
 drop trigger if exists t_rcpt_guard on message_recipients; create trigger t_rcpt_guard before update on message_recipients for each row execute function trg_rcpt_guard();
 
+-- ---------- historical import, monthly ERP sales, actual costs, dispatch plans
+alter table customers add column if not exists customer_code text;
+create unique index if not exists customers_code_uq on customers(lower(customer_code)) where customer_code is not null;
+create table if not exists import_logs(id uuid primary key default gen_random_uuid(), kind text not null, month text, file_name text, rows_total int, added int, updated int, rejected int, rejected_rows jsonb default '[]',
+  by_id uuid default auth.uid(), created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists customer_history(id uuid primary key default gen_random_uuid(), customer_id uuid not null references customers on delete cascade, customer_code text, order_date date, order_no text, sku_code text, qty numeric, value numeric, notes text,
+  created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists sales_uploads(id uuid primary key default gen_random_uuid(), month text not null unique check (month ~ '^\d{4}-\d{2}$'), file_name text, rows int, total_value numeric, uploaded_by uuid default auth.uid(),
+  created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists sales_lines(id uuid primary key default gen_random_uuid(), upload_id uuid not null references sales_uploads on delete cascade, month text not null, invoice_no text not null, invoice_date date, customer_code text, customer_name text,
+  customer_id uuid references customers, sku text, qty numeric, unit text, value numeric not null, so_no text, exec_raw text, exec_id uuid references profiles(id), is_common boolean not null default false,
+  created_at timestamptz default now(), updated_at timestamptz default now());
+create index if not exists sales_lines_month on sales_lines(month); create index if not exists sales_lines_exec on sales_lines(exec_id);
+create table if not exists exec_aliases(id uuid primary key default gen_random_uuid(), alias text not null unique, raw_name text, exec_id uuid references profiles(id), is_common boolean not null default false,
+  created_at timestamptz default now(), updated_at timestamptz default now(), check (is_common or exec_id is not null));
+create table if not exists actual_costs(id uuid primary key default gen_random_uuid(), month text not null check (month ~ '^\d{4}-\d{2}$'), sku_id uuid references skus on delete cascade, product text, material numeric, conversion numeric,
+  cost_per_kg numeric not null, remarks text, by_id uuid default auth.uid(), created_at timestamptz default now(), updated_at timestamptz default now(), check (sku_id is not null or product is not null));
+create unique index if not exists actual_costs_uq on actual_costs(month, coalesce(sku_id::text, lower(product)));
+create table if not exists dispatch_plans(id uuid primary key default gen_random_uuid(), date date not null, order_id uuid references orders, sku_id uuid references skus, customer_id uuid references customers,
+  planned_qty numeric not null, planned_vehicle text, planned_time text, priority text default 'Normal', remarks text, created_by uuid default auth.uid(),
+  actual_qty numeric, vehicle_no text, driver text, transporter text, lr_no text, dispatch_time text, invoice_no text, invoice_file_name text, invoice_file_path text,
+  dispatch_id uuid references dispatches, invoice_id uuid references invoices, confirmed_by uuid, confirmed_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now());
+-- planning may change only plan fields; dispatch only confirmation fields
+create or replace function trg_dplan() returns trigger language plpgsql as $$
+begin
+  if is_full() then return new; end if;
+  if my_role()='dispatch' and (new.date,new.order_id,new.sku_id,new.customer_id,new.planned_qty,new.planned_vehicle,new.planned_time,new.priority,new.remarks)
+     is distinct from (old.date,old.order_id,old.sku_id,old.customer_id,old.planned_qty,old.planned_vehicle,old.planned_time,old.priority,old.remarks) then raise exception 'Dispatch can only confirm, not change the plan'; end if;
+  if my_role()='planning' and (new.actual_qty,new.vehicle_no,new.lr_no,new.invoice_no,new.confirmed_at) is distinct from (old.actual_qty,old.vehicle_no,old.lr_no,old.invoice_no,old.confirmed_at) then raise exception 'Only Dispatch confirms dispatches'; end if;
+  return new; end $$;
+drop trigger if exists t_dplan on dispatch_plans; create trigger t_dplan before update on dispatch_plans for each row execute function trg_dplan();
+
 -- generic audit trail on every write
 create or replace function trg_audit() returns trigger language plpgsql security definer set search_path=public as $$
 begin insert into audit_log(action,table_name,record_id,detail,user_id,user_email)
@@ -167,13 +199,13 @@ begin insert into audit_log(action,table_name,record_id,detail,user_id,user_emai
   case when TG_OP='DELETE' then to_jsonb(old) else to_jsonb(new) end, auth.uid(), (select email from profiles where id=auth.uid()));
 return coalesce(new,old); end $$;
 do $$ declare t text; begin foreach t in array array['profiles','customers','enquiries','specs','costings','costing_margins','quotations','quotation_margins','activities','tasks','visits','incentive_rules','settings','targets',
- 'skus','samples','artworks','orders','order_stages','invoices','dispatches','collections','invoice_followups','complaints','messages'] loop
+ 'skus','samples','artworks','orders','order_stages','invoices','dispatches','collections','invoice_followups','complaints','messages','import_logs','customer_history','sales_uploads','exec_aliases','actual_costs','dispatch_plans'] loop
   execute format('drop trigger if exists t_audit on %I; create trigger t_audit after insert or update or delete on %I for each row execute function trg_audit()',t,t); end loop; end $$;
 
 
 -- ---------- Row-level security
 do $$ declare t text; begin foreach t in array array['profiles','customers','enquiries','specs','costings','costing_margins','quotations','quotation_margins','activities','tasks','visits','incentive_rules','settings','targets',
- 'skus','samples','artworks','orders','order_stages','invoices','dispatches','collections','invoice_followups','complaints','audit_log','doc_counters','messages','message_recipients'] loop
+ 'skus','samples','artworks','orders','order_stages','invoices','dispatches','collections','invoice_followups','complaints','audit_log','doc_counters','messages','message_recipients','import_logs','customer_history','sales_uploads','sales_lines','exec_aliases','actual_costs','dispatch_plans'] loop
   execute format('alter table %I enable row level security',t);
   execute (select coalesce(string_agg(format('drop policy if exists %I on %I;',policyname,t),' '),'select 1') from pg_policies where schemaname='public' and tablename=t);
   execute format('create policy adm_%1$s on %1$I for all using (is_admin()) with check (is_admin())',t);  -- HR Admin: everything
@@ -252,6 +284,39 @@ create policy i_msg on messages for insert with check (is_full() and sender_id=a
 create policy r_msg on messages for select using (sender_id=auth.uid() or is_msg_recipient(id));
 create policy r_rcpt on message_recipients for select using (user_id=auth.uid() or is_msg_sender(message_id));
 create policy u_rcpt on message_recipients for update using (user_id=auth.uid()) with check (user_id=auth.uid());
+
+-- historical import & ERP sales: only HR Admin writes (adm_ policies); MD/CEO see all; marketing sees only own sales rows
+create policy r_implog on import_logs for select using (is_full());
+create policy r_chist on customer_history for select using (signed_in());
+create policy r_supl on sales_uploads for select using (signed_in());
+create policy r_sl on sales_lines for select using (is_full() or exec_id in (select my_team()));
+create policy r_alias on exec_aliases for select using (is_full());
+-- actual cost/kg: costing enters; visible only to hr_admin/md/ceo/costing
+create policy r_ac on actual_costs for select using (can_margin());
+create policy i_ac on actual_costs for insert with check (has_role('costing'));
+create policy u_ac on actual_costs for update using (has_role('costing'));
+-- dispatch plans: planning plans, dispatch confirms; visible to management, marketing, planning, dispatch
+create policy r_dp on dispatch_plans for select using (has_role('md','ceo','marketing','planning','dispatch'));
+create policy i_dp on dispatch_plans for insert with check (has_role('planning','md','ceo'));
+create policy u_dp on dispatch_plans for update using (has_role('planning','dispatch','md','ceo'));
+
+-- incentive on actual ERP sales, margin from latest actual cost/kg (margin only shown to margin roles)
+create or replace function sales_incentives() returns table(month text, exec_id uuid, qty numeric, value numeric, margin_pct numeric, slab text, incentive numeric, margin_basis text)
+language sql stable security definer set search_path=public as $$
+  with lm as (
+    select l.month, l.exec_id, l.qty, l.value, l.unit,
+      (select ac.cost_per_kg from actual_costs ac left join skus s on s.id=ac.sku_id
+        where ac.month<=l.month and (regexp_replace(lower(coalesce(s.sku_code,ac.product,'')),'[^a-z0-9]','','g')=regexp_replace(lower(coalesce(l.sku,'')),'[^a-z0-9]','','g'))
+        order by ac.month desc limit 1) c
+    from sales_lines l where not l.is_common and l.exec_id is not null and (is_full() or l.exec_id=auth.uid())),
+  g as (select lm.month, lm.exec_id, sum(lm.qty) qty, sum(lm.value) val,
+      sum(case when c>0 and lm.qty>0 and (unit is null or unit ilike 'kg%') then lm.value*((lm.value/lm.qty)/c-1)*100 end)
+      / nullif(sum(case when c>0 and lm.qty>0 and (unit is null or unit ilike 'kg%') then lm.value end),0) m
+    from lm group by 1,2)
+  select g.month, g.exec_id, g.qty, g.val, case when can_margin() then round(g.m,2) end, r.name, coalesce(round(g.val*r.pct/100,2),0),
+    case when g.m is null then 'no actual cost — lowest slab' else 'actual cost' end
+  from g left join lateral (select * from incentive_rules r where g.qty>=r.min_qty and g.val>=r.min_value and (g.m is null or (g.m>=r.margin_from and g.m<r.margin_to))
+    order by case when g.m is null then r.margin_from end nulls last, r.created_at limit 1) r on true $$;
 
 -- ---------- incentives computed server-side (marketing never sees margins)
 create or replace function incentive_lines() returns table(enquiry_id uuid, enq_no text, owner_id uuid, customer_id uuid, qty numeric, value numeric, margin_pct numeric, slab text, incentive numeric)
