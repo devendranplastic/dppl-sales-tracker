@@ -104,3 +104,19 @@ select pg_temp.ok('hr_admin: edits profiles',(select territory from profiles whe
 select pg_temp.ok('hr_admin: sees all costing & margins',(select count(*) from costing_margins)>0 and (select count(*) from quotation_margins)>0);
 select pg_temp.ok('hr_admin: audit log populated for all writes',(select count(distinct table_name) from audit_log)>=10);
 reset role;
+-- broadcast messages
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000003',false); set role authenticated;
+select pg_temp.fails('marketing: cannot broadcast',$$insert into messages(sender_id,subject,body) values(auth.uid(),'x','y')$$);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000002',false); set role authenticated;
+select pg_temp.fails('md: cannot broadcast as someone else',$$insert into messages(sender_id,subject,body) values('a0000000-0000-0000-0000-000000000001','x','y')$$);
+insert into messages(subject,body,all_users,roles) values('Monthly review','Meeting Monday 10am',false,'{marketing}');
+select pg_temp.ok('md: fan-out to active marketing only (2, excludes deactivated)',(select count(*) from message_recipients)=2);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000003',false); set role authenticated;
+select pg_temp.ok('recipient: sees message + own receipt only',(select count(*) from messages)=1 and (select count(*) from message_recipients)=1);
+update message_recipients set read_at=now();
+select pg_temp.fails('recipient: cannot redirect receipt',$$update message_recipients set user_id='a0000000-0000-0000-0000-000000000004'$$);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000006',false); set role authenticated;
+select pg_temp.ok('non-recipient (planning): sees nothing',(select count(*) from messages)=0);
+reset role; select set_config('request.jwt.claim.sub','a0000000-0000-0000-0000-000000000002',false); set role authenticated;
+select pg_temp.ok('md sender: read receipts 1/2',(select count(*) filter (where read_at is not null)||'/'||count(*) from message_recipients)='1/2');
+reset role;

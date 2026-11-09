@@ -4,7 +4,7 @@ const inr=n=>'₹'+Number(n||0).toLocaleString('en-IN');const today=()=>new Date
 const fd=d=>d?new Date(d).toLocaleDateString('en-GB'):'';
 const STAGES=['New','Specification','Feasibility','Costing','Quotation','Negotiation','Won','Lost'];
 let U=null,D={},view='dash',sel=null,filt={};
-async function load(){for(const t of ['customers','enquiries','specs','costings','quotations','activities','tasks','audit_log','visits','incentive_rules','profiles','settings','targets','invoices','collections','invoice_followups','skus','samples','artworks','orders','order_stages','dispatches','complaints',...(DB.mode==='Supabase'?['incentive_lines']:[])])D[t]=await DB.list(t);D.loadedAt=new Date();if(window.applySettings)applySettings()}
+async function load(){for(const t of ['customers','enquiries','specs','costings','quotations','activities','tasks','audit_log','visits','incentive_rules','profiles','settings','targets','invoices','collections','invoice_followups','skus','samples','artworks','orders','order_stages','dispatches','complaints','messages','message_recipients',...(DB.mode==='Supabase'?['incentive_lines']:[])])D[t]=await DB.list(t);D.loadedAt=new Date();if(window.applySettings)applySettings()}
 const pname=id=>{const p=(D.profiles||[]).find(p=>p.id===id);return p?(p.full_name||p.email):(id?'(unknown user)':'')};window.pname=pname;
 const ownerSel=(v,dis='')=>`<select name="owner_id" required ${dis}>${(D.profiles||[]).filter(p=>p.active!==false&&['marketing','md','ceo','hr_admin'].includes(p.role)).map(p=>`<option value="${p.id}" ${p.id===v?'selected':''}>${esc(p.full_name||p.email)}</option>`).join('')}</select>`;
 const cname=id=>(D.customers.find(c=>c.id===id)||{}).name||'';
@@ -13,14 +13,15 @@ function loginPage(msg){A.innerHTML=`<div class="auth"><img src="assets/dppl_com
 <form id="lf"><label>Email</label><input name="email" type="email" required><label>Password</label><input name="pw" type="password" required><button style="width:100%">Sign in</button></form>
 ${msg?`<p class="bad">${esc(msg)}</p>`:''}<p><small>Mode: ${DB.mode}</small></p>
 ${DB.mode!=='Supabase'?`<div class="card" style="text-align:left;font-size:13px"><b>Demo accounts</b><table>${DEMO_USERS.map(u=>`<tr><td>${u.role}</td><td>${u.email}</td><td>${u.pw}</td></tr>`).join('')}</table></div>`:''}</div>`;
-$('#lf').onsubmit=async e=>{e.preventDefault();const f=fv(e.target);try{U=await DB.login(f.email,f.pw);await audit('login','auth',null);start()}catch(x){loginPage(x.message)}}}
+$('#lf').onsubmit=async e=>{e.preventDefault();const f=fv(e.target);try{U=await DB.login(f.email,f.pw);view='dash';sel=null;await audit('login','auth',null);start()}catch(x){loginPage(x.message)}}}
 function outPage(){A.innerHTML=`<div class="auth"><img src="assets/bala_hr_logo.png" alt="Bala HR" style="max-width:240px"><h2>You have signed out</h2><p>Thank you for using the DPPL Sales & Order Tracker.</p><button onclick="loginPage()">Sign in again</button></div>`}
 window.loginPage=loginPage;
 async function start(){await load();render()}
 function shell(body){const tabs=[['dash','Dashboard'],['tasks','Tasks'],['enq','Enquiries'],['cust','Customers'],...(can(U,'visit')||can(U,'full')?[['visits','Visits']]:[]),...(can(U,'inc_all')||can(U,'inc_own')?[['inc','Incentives']]:[]),...(window.extraTabs?extraTabs():[]),...(can(U,'full')?[['audit','Audit log']]:[])];
-A.innerHTML=`<header><img src="assets/dppl_company_logo.png" alt="DPPL"><b style="color:var(--navy)">Sales & Order Tracker</b><span class="sp"></span><small>${esc(U.name)} · ${U.role} · ${DB.mode}${can(U,'edit')?'':' · view only'}</small><button class="lt" id="lo">Logout</button></header>
+A.innerHTML=`<header><img src="assets/dppl_company_logo.png" alt="DPPL"><b style="color:var(--navy)">Sales & Order Tracker</b><span class="sp"></span><small>${esc(U.name)} · ${U.role} · ${DB.mode}${can(U,'edit')?'':' · view only'}</small>${window.bellHtml?bellHtml():''}<button class="lt" id="lo">Logout</button></header>
 <nav>${tabs.map(([k,l])=>`<a href="#" data-v="${k}" class="${view===k?'on':''}">${l}</a>`).join('')}</nav><main>${body}<p><small>Last updated: ${D.loadedAt.toLocaleString('en-GB')}</small></p></main>`;
 document.querySelectorAll('nav a').forEach(a=>a.onclick=e=>{e.preventDefault();view=a.dataset.v;sel=null;render()});
+const bl=$('#bell');if(bl)bl.onclick=()=>{view='inbox';sel=null;render()};
 $('#lo').onclick=async()=>{await audit('logout','auth',null);await DB.logout();U=null;outPage()}}
 const visible=()=>D.enquiries.filter(e=>U.role!=='marketing'||true); // marketing sees own + team (whole marketing team)
 function render(){const fn={...(window.VIEWS||{}),visits:visitsV,inc:incV,dash,tasks,enq,cust,audit:auditV,detail}[view];shell(fn());(window['bind_'+view]||(()=>{}))()}

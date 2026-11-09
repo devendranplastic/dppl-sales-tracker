@@ -148,6 +148,18 @@ begin if not is_full() and (new.order_id,new.seq,new.name,new.dept_role) is dist
 new.updated_by:=auth.uid(); return new; end $$;
 drop trigger if exists t_stage on order_stages; create trigger t_stage before update on order_stages for each row execute function trg_stage();
 
+-- ---------- in-app broadcast messages (MD / CEO / HR Admin -> all or selected roles)
+create table if not exists messages(id uuid primary key default gen_random_uuid(), sender_id uuid not null default auth.uid() references profiles(id), subject text not null, body text not null,
+  all_users boolean not null default true, roles text[] not null default '{}', created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists message_recipients(id uuid primary key default gen_random_uuid(), message_id uuid not null references messages on delete cascade, user_id uuid not null references profiles(id) on delete cascade,
+  read_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now(), unique(message_id,user_id));
+create or replace function trg_message_fanout() returns trigger language plpgsql security definer set search_path=public as $$
+begin insert into message_recipients(message_id,user_id) select new.id,p.id from profiles p where p.active and (new.all_users or p.role=any(new.roles)) on conflict do nothing; return new; end $$;
+drop trigger if exists t_msg_fanout on messages; create trigger t_msg_fanout after insert on messages for each row execute function trg_message_fanout();
+create or replace function trg_rcpt_guard() returns trigger language plpgsql as $$
+begin if (new.message_id,new.user_id) is distinct from (old.message_id,old.user_id) then raise exception 'Only read status can change'; end if; return new; end $$;
+drop trigger if exists t_rcpt_guard on message_recipients; create trigger t_rcpt_guard before update on message_recipients for each row execute function trg_rcpt_guard();
+
 -- generic audit trail on every write
 create or replace function trg_audit() returns trigger language plpgsql security definer set search_path=public as $$
 begin insert into audit_log(action,table_name,record_id,detail,user_id,user_email)
@@ -155,12 +167,13 @@ begin insert into audit_log(action,table_name,record_id,detail,user_id,user_emai
   case when TG_OP='DELETE' then to_jsonb(old) else to_jsonb(new) end, auth.uid(), (select email from profiles where id=auth.uid()));
 return coalesce(new,old); end $$;
 do $$ declare t text; begin foreach t in array array['profiles','customers','enquiries','specs','costings','costing_margins','quotations','quotation_margins','activities','tasks','visits','incentive_rules','settings','targets',
- 'skus','samples','artworks','orders','order_stages','invoices','dispatches','collections','invoice_followups','complaints'] loop
+ 'skus','samples','artworks','orders','order_stages','invoices','dispatches','collections','invoice_followups','complaints','messages'] loop
   execute format('drop trigger if exists t_audit on %I; create trigger t_audit after insert or update or delete on %I for each row execute function trg_audit()',t,t); end loop; end $$;
+
 
 -- ---------- Row-level security
 do $$ declare t text; begin foreach t in array array['profiles','customers','enquiries','specs','costings','costing_margins','quotations','quotation_margins','activities','tasks','visits','incentive_rules','settings','targets',
- 'skus','samples','artworks','orders','order_stages','invoices','dispatches','collections','invoice_followups','complaints','audit_log','doc_counters'] loop
+ 'skus','samples','artworks','orders','order_stages','invoices','dispatches','collections','invoice_followups','complaints','audit_log','doc_counters','messages','message_recipients'] loop
   execute format('alter table %I enable row level security',t);
   execute (select coalesce(string_agg(format('drop policy if exists %I on %I;',policyname,t),' '),'select 1') from pg_policies where schemaname='public' and tablename=t);
   execute format('create policy adm_%1$s on %1$I for all using (is_admin()) with check (is_admin())',t);  -- HR Admin: everything
@@ -231,6 +244,14 @@ create policy i_cmp on complaints for insert with check (can_edit());
 create policy u_cmp on complaints for update using (can_edit() or has_role('factory_manager'));
 -- audit log: read by md/ceo (HR Admin via adm_ policy); written only by triggers (security definer)
 create policy r_audit on audit_log for select using (is_full());
+
+-- messages: only md/ceo/hr_admin broadcast (as themselves); recipients read their own; sender sees read receipts
+create or replace function is_msg_sender(m uuid) returns boolean language sql stable security definer set search_path=public as $$ select exists(select 1 from messages where id=m and sender_id=auth.uid()) $$;
+create or replace function is_msg_recipient(m uuid) returns boolean language sql stable security definer set search_path=public as $$ select exists(select 1 from message_recipients where message_id=m and user_id=auth.uid()) $$;
+create policy i_msg on messages for insert with check (is_full() and sender_id=auth.uid());
+create policy r_msg on messages for select using (sender_id=auth.uid() or is_msg_recipient(id));
+create policy r_rcpt on message_recipients for select using (user_id=auth.uid() or is_msg_sender(message_id));
+create policy u_rcpt on message_recipients for update using (user_id=auth.uid()) with check (user_id=auth.uid());
 
 -- ---------- incentives computed server-side (marketing never sees margins)
 create or replace function incentive_lines() returns table(enquiry_id uuid, enq_no text, owner_id uuid, customer_id uuid, qty numeric, value numeric, margin_pct numeric, slab text, incentive numeric)

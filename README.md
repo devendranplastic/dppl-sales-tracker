@@ -7,7 +7,7 @@ Customers · Enquiries (spec, feasibility, costing, quotation revisions + margin
 Customer SKUs · Samples & trials (Request → Tech approval → Preparation → QA → Dispatched → Received → Trial → Feedback → Closed) ·
 Artwork revisions (approve → lock; others obsolete; tooling cost/ownership/storage) · Orders (PO entry/upload → checklist vs approved quotation → release with ORD number → auto production route → department stage updates with delay reason/recovery/revised date) ·
 Dispatch (partial, invoice, transporter, vehicle, LR, POD → invoice in Collections) · Collections (ageing, follow-ups, promises) · Complaints · Repeat-business alerts ·
-Incentives (MD/CEO-editable slabs) · Analysis (target vs achievement) · Setup (users, targets, visit rules) · Import/Export (CSV/Excel for customers, SKUs, orders, invoices) · Audit log.
+Messages (MD/CEO/HR Admin broadcast to all or selected roles; bell with unread count; read receipts; optional WhatsApp/email share — no automatic sending) · Incentives (MD/CEO-editable slabs) · Analysis (target vs achievement) · Setup (users, targets, visit rules) · Import/Export (CSV/Excel for customers, SKUs, orders, invoices) · Audit log.
 Separate statuses on every enquiry: sales · artwork/sample · order · payment. Won date recorded; "Sales won" uses released orders.
 
 ## Roles
@@ -17,8 +17,8 @@ costing (costing sheets, feasibility, margins, sample tech approval) · factory_
 ## Connect Supabase
 1. Create a Supabase project (region: Mumbai).
 2. SQL editor → run `supabase/schema.sql`, then `supabase/storage.sql` (PO file bucket).
-3. Authentication → Users → add yourself (HR Admin). Then in SQL editor run, with your email:
-   `update profiles set role='hr_admin' where email='YOUR_EMAIL';`  (never commit a real email/password to this public repo)
+3. Authentication → Users → add the six DPPL users (hr@, md@, balaji@, nathan@, jesaon@, suresh@devendranplastic.com) with passwords set in Supabase only.
+   Then run `supabase/seed_users.sql` (sets roles/names; lists any email not yet created). Never commit passwords.
 4. Optional (to invite users from the app): install Supabase CLI, `supabase login`, `supabase link --project-ref <ref>`, `supabase functions deploy invite-user`.
    Optionally `supabase secrets set SITE_URL=https://popkalis-nandu.github.io/dppl-sales-tracker/`. Also set Authentication → URL configuration → Site URL to the live URL.
    Without the function: add users in Supabase → Authentication; they appear in Setup → Users to assign roles.
@@ -33,4 +33,4 @@ Invoices/collections/targets/visits: own (and direct reports) for executives, al
 Every write is recorded in `audit_log` by trigger. Deactivated users lose all access.
 
 ## Tests
-- `supabase/test/local_stubs.sql` + `schema.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 39/39 role-switching checks pass.
+- `supabase/test/local_stubs.sql` + `schema.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 46/46 role-switching checks pass (incl. broadcast messages); seed_users.sql verified.
