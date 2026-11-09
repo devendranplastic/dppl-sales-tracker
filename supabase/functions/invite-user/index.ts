@@ -3,7 +3,7 @@
 // Secrets: SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are injected automatically by Supabase.
 // Optional: supabase secrets set SITE_URL=https://popkalis-nandu.github.io/dppl-sales-tracker/
 import { createClient } from "npm:@supabase/supabase-js@2";
-const ROLES = ["hr_admin","md","ceo","marketing","costing","factory_manager","planning","dispatch"];
+const ROLES = ["hr_admin","md","ceo","marketing","costing","factory_manager","planning","dispatch","accounts","data_entry"];
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 Deno.serve(async (req) => {
@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
       : await admin.auth.admin.inviteUserByEmail(email, { data: { full_name }, redirectTo: Deno.env.get("SITE_URL") ?? undefined });
     if (res.error) return json({ error: res.error.message }, 400);
     const id = res.data.user!.id;
-    const { error } = await admin.from("profiles").upsert({ id, email, full_name, role, emp_code, mobile, territory, active: true });
+    const { error } = await admin.from("profiles").upsert({ id, email, full_name, role, emp_code, mobile, territory, active: true, must_change_password: true });
     if (error) return json({ error: error.message }, 400);
     await admin.from("audit_log").insert({ action: "invite", table_name: "profiles", record_id: id, user_id: user.id, detail: { email, role } });
     return json({ id, invited: !password });

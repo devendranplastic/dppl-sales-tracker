@@ -19,7 +19,13 @@ Separate statuses on every enquiry: sales · artwork/sample · order · payment.
 
 ## Roles
 hr_admin (system admin, everything) · md / ceo (all data, approvals, release, setup read-only) · marketing (customers, enquiries, quotes, PO, samples, artwork, complaints; no costing/margins) ·
-costing (costing sheets, feasibility, margins, sample tech approval) · factory_manager / planning / dispatch (read; update only their own production stages; dispatch records dispatches & invoices).
+costing (costing sheets, feasibility, margins, sample tech approval) · factory_manager / planning / dispatch (read; update only their own production stages; dispatch records dispatches & invoices) ·
+accounts (Ramesh: invoices, receipts, partial payments, disputes, credit limit/hold and credit approval; views ERP sales and dispatch invoices; no costing) ·
+data_entry (info@: enters visits/enquiries/follow-ups on behalf of the executive set in Setup → Users "Enters data for" — records are owned by that executive, audit shows the typist).
+
+Also: MD dashboard **sales vs target charts** (Chart.js; per person + company incl. common orders, month selector, month-on-month trend; marketing sees own) · **Expenses** menu (under construction, Future) · forced **password change at first sign-in** (`profiles.must_change_password`).
+
+Docs: [User guide](docs/USER_GUIDE.md) ([PDF](docs/DPPL_Sales_Order_Tracker_User_Guide.pdf)) · [Go-live steps](docs/SETUP_SUPABASE.md).
 
 ## Connect Supabase
 1. Create a Supabase project (region: Mumbai).
@@ -40,4 +46,4 @@ Invoices/collections/targets/visits: own (and direct reports) for executives, al
 Every write is recorded in `audit_log` by trigger. Deactivated users lose all access.
 
 ## Tests
-- `supabase/setup_all.sql` (one-shot: schema + storage; rebuild with `supabase/build_setup_all.sh`). `supabase/test/local_stubs.sql` + `setup_all.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 65/65 role-switching checks pass (incl. messages, ERP sales, actual cost, dispatch plans); seed_users.sql verified.
+- `supabase/setup_all.sql` (one-shot: schema + storage; rebuild with `supabase/build_setup_all.sh`). `supabase/test/local_stubs.sql` + `setup_all.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 82/82 role-switching checks pass (incl. messages, ERP sales, actual cost, dispatch plans, accounts, data-entry delegate, credit hold); seed_users.sql verified.

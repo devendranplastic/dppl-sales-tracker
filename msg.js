@@ -1,5 +1,5 @@
 // In-app broadcast messages (MD / CEO / HR Admin -> all users or selected roles) with unread bell + read receipts.
-const MROLES=[['hr_admin','HR Admin'],['md','MD'],['ceo','CEO'],['marketing','Marketing'],['costing','Costing'],['factory_manager','Factory'],['planning','Planning'],['dispatch','Dispatch']];
+const MROLES=[['hr_admin','HR Admin'],['md','MD'],['ceo','CEO'],['marketing','Marketing'],['costing','Costing'],['factory_manager','Factory'],['planning','Planning'],['dispatch','Dispatch'],['data_entry','Data entry']];
 const myRcpt=()=>(D.message_recipients||[]).filter(r=>r.user_id===U.id);
 const unread=()=>myRcpt().filter(r=>!r.read_at).length;
 window.bellHtml=()=>`<button id="bell" title="Messages">🔔${unread()?`<b>${unread()}</b>`:''}</button>`;

@@ -1,7 +1,7 @@
 -- =====================================================================
 -- DPPL Sales & Order Tracker — complete Supabase schema (v3)
 -- Run once in Supabase → SQL editor on a NEW project. Safe to re-run.
--- Roles: hr_admin (system admin) · md · ceo · marketing · costing · factory_manager · planning · dispatch
+-- Roles: hr_admin (system admin) · md · ceo · marketing · costing · factory_manager · planning · dispatch · accounts · data_entry (enters data on behalf of one marketing executive)
 -- No real credentials belong in this file (public repo).
 -- =====================================================================
 create extension if not exists pgcrypto;
@@ -10,10 +10,14 @@ create extension if not exists pgcrypto;
 create table if not exists profiles(
   id uuid primary key references auth.users on delete cascade,
   email text, full_name text,
-  role text not null default 'dispatch' check (role in ('hr_admin','md','ceo','marketing','costing','factory_manager','planning','dispatch')),
+  role text not null default 'dispatch' check (role in ('hr_admin','md','ceo','marketing','costing','factory_manager','planning','dispatch','accounts','data_entry')),
   emp_code text, mobile text, territory text, reporting_manager uuid references profiles(id), active boolean not null default true,
   created_at timestamptz default now(), updated_at timestamptz default now());
 
+alter table profiles add column if not exists delegate_for uuid references profiles(id);
+alter table profiles add column if not exists must_change_password boolean not null default true;
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('hr_admin','md','ceo','marketing','costing','factory_manager','planning','dispatch','accounts','data_entry'));
 create or replace function my_role() returns text language sql stable security definer set search_path=public as
 $$ select role from profiles where id=auth.uid() and active $$;
 create or replace function has_role(variadic r text[]) returns boolean language sql stable as $$ select coalesce(my_role()=any(r),false) $$;
@@ -25,6 +29,11 @@ create or replace function signed_in() returns boolean language sql stable as $$
 create or replace function my_team() returns setof uuid language sql stable security definer set search_path=public as
 $$ select auth.uid() union select id from profiles where reporting_manager=auth.uid() $$;
 
+create or replace function acting_for() returns uuid language sql stable security definer set search_path=public as
+$$ select delegate_for from profiles where id=auth.uid() and active and role='data_entry' $$;
+-- called by the app after auth.updateUser({password}) on first login
+create or replace function password_changed() returns void language sql security definer set search_path=public as
+$$ update profiles set must_change_password=false, updated_at=now() where id=auth.uid() $$;
 create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$
 begin insert into profiles(id,full_name,email) values(new.id,coalesce(new.raw_user_meta_data->>'full_name',split_part(new.email,'@',1)),new.email) on conflict (id) do nothing; return new; end $$;
 drop trigger if exists on_auth_user_created on auth.users;
@@ -192,6 +201,37 @@ begin
   return new; end $$;
 drop trigger if exists t_dplan on dispatch_plans; create trigger t_dplan before update on dispatch_plans for each row execute function trg_dplan();
 
+-- ---------- accounts: credit control & disputes; data entry on behalf
+alter table customers add column if not exists credit_limit numeric;
+alter table customers add column if not exists credit_hold boolean not null default false;
+alter table invoices add column if not exists dispute text default 'None';
+alter table invoices add column if not exists dispute_note text;
+alter table orders add column if not exists credit_approved boolean not null default false;
+alter table orders add column if not exists credit_approved_by uuid;
+alter table orders add column if not exists credit_approved_at timestamptz;
+-- Accounts may change only credit fields on customers and credit approval on orders
+create or replace function trg_accounts_guard() returns trigger language plpgsql as $$
+declare allowed text[] := case TG_TABLE_NAME when 'customers' then array['credit_limit','credit_hold','updated_at'] else array['credit_approved','credit_approved_by','credit_approved_at','updated_at'] end;
+begin
+  if my_role()='accounts' and (to_jsonb(new) - allowed) is distinct from (to_jsonb(old) - allowed) then raise exception 'Accounts can only change credit fields here'; end if;
+  if TG_TABLE_NAME='orders' then
+    if new.credit_approved and not old.credit_approved then
+      if not has_role('accounts','hr_admin','md','ceo') then raise exception 'Credit approval is for Accounts'; end if;
+      new.credit_approved_by:=auth.uid(); new.credit_approved_at:=now(); end if; end if;
+  return new; end $$;
+drop trigger if exists t_acc_guard on customers; create trigger t_acc_guard before update on customers for each row execute function trg_accounts_guard();
+drop trigger if exists t_acc_guard on orders; create trigger t_acc_guard before update on orders for each row execute function trg_accounts_guard();
+-- release blocked while customer is on credit hold / over limit unless Accounts approved
+create or replace function trg_credit_release() returns trigger language plpgsql security definer set search_path=public as $$
+declare c customers; o numeric;
+begin
+  if new.released and not old.released and not new.credit_approved then
+    select * into c from customers where id=new.customer_id;
+    select coalesce(sum(i.amount - coalesce((select sum(k.amount) from collections k where k.invoice_id=i.id),0)),0) into o from invoices i where i.customer_id=new.customer_id;
+    if c.credit_hold or (c.credit_limit>0 and o + new.po_qty*new.po_price > c.credit_limit) then raise exception 'Customer on credit hold / over credit limit — Accounts approval required'; end if;
+  end if; return new; end $$;
+drop trigger if exists t_credit on orders; create trigger t_credit before update on orders for each row execute function trg_credit_release();
+
 -- generic audit trail on every write
 create or replace function trg_audit() returns trigger language plpgsql security definer set search_path=public as $$
 begin insert into audit_log(action,table_name,record_id,detail,user_id,user_email)
@@ -317,6 +357,29 @@ language sql stable security definer set search_path=public as $$
     case when g.m is null then 'no actual cost — lowest slab' else 'actual cost' end
   from g left join lateral (select * from incentive_rules r where g.qty>=r.min_qty and g.val>=r.min_value and (g.m is null or (g.m>=r.margin_from and g.m<r.margin_to))
     order by case when g.m is null then r.margin_from end nulls last, r.created_at limit 1) r on true $$;
+
+-- data entry on behalf (e.g. info@ for Balaji): records are owned by the executive; audit_log.user_id shows who keyed them
+create policy de_cust_i on customers for insert with check (has_role('data_entry') and created_by=acting_for());
+create policy de_enq_i on enquiries for insert with check (has_role('data_entry') and owner_id=acting_for());
+create policy de_enq_u on enquiries for update using (has_role('data_entry') and owner_id=acting_for()) with check (owner_id=acting_for());
+create policy de_act_i on activities for insert with check (has_role('data_entry') and by_id=acting_for() and exists(select 1 from enquiries e where e.id=enquiry_id and e.owner_id=acting_for()));
+create policy de_task_i on tasks for insert with check (has_role('data_entry') and owner_id=acting_for());
+create policy de_task_u on tasks for update using (has_role('data_entry') and owner_id=acting_for());
+create policy de_vis_r on visits for select using (has_role('data_entry') and by_id=acting_for());
+create policy de_vis_i on visits for insert with check (has_role('data_entry') and by_id=acting_for());
+create policy de_vis_u on visits for update using (has_role('data_entry') and by_id=acting_for());
+create policy de_tgt_r on targets for select using (has_role('data_entry') and exec_id=acting_for());
+-- accounts (Ramesh): invoices, receipts, disputes, credit control; reads ERP sales and dispatch plans; no costing/margins
+create policy acc_inv_r on invoices for select using (has_role('accounts'));
+create policy acc_inv_i on invoices for insert with check (has_role('accounts'));
+create policy acc_inv_u on invoices for update using (has_role('accounts'));
+create policy acc_col_i on collections for insert with check (has_role('accounts'));
+create policy acc_col_u on collections for update using (has_role('accounts'));
+create policy acc_fu_i on invoice_followups for insert with check (has_role('accounts'));
+create policy acc_cust_u on customers for update using (has_role('accounts'));
+create policy acc_ord_u on orders for update using (has_role('accounts'));
+create policy acc_sl_r on sales_lines for select using (has_role('accounts'));
+create policy acc_dp_r on dispatch_plans for select using (has_role('accounts'));
 
 -- ---------- incentives computed server-side (marketing never sees margins)
 create or replace function incentive_lines() returns table(enquiry_id uuid, enq_no text, owner_id uuid, customer_id uuid, qty numeric, value numeric, margin_pct numeric, slab text, incentive numeric)

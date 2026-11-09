@@ -66,7 +66,7 @@ const prevMonth=()=>{const n=new Date();return ymd(new Date(n.getFullYear(),n.ge
 window.salesBanner=()=>{const lu=lastUpload();let h=`<div class="card"><small>Sales data last uploaded: <b>${lu?`${lu.month}, ${fd(lu.created_at)}`:'never'}</b></small>`;
  if(can(U,'hist')&&new Date().getDate()>=5&&!(D.sales_uploads||[]).some(u=>u.month===prevMonth()))h+=`<div class="warn">Reminder: ERP sales for <b>${prevMonth()}</b> have not been uploaded yet. <a href="#" data-go="hist:">Upload now</a></div>`;return h+'</div>'};
 let smon='';
-function salesV(){const M=salesMonths();if(!smon)smon=M[0]||'';const all=can(U,'full'),L=salesIn(m=>m===smon).filter(l=>all||l.exec_id===U.id);
+function salesV(){const M=salesMonths();if(!smon)smon=M[0]||'';const all=can(U,'full')||can(U,'sales_view'),L=salesIn(m=>m===smon).filter(l=>all||l.exec_id===ME());
  const by={};L.forEach(l=>{const k=l.is_common?'__common':l.exec_id||'__common';(by[k]=by[k]||[]).push(l)});const sum=(a,f)=>a.reduce((s,l)=>s+(+l[f]||0),0);
  const tg=x=>{const t=(D.targets||[]).find(t=>t.exec_id===x&&t.period===smon);return t&&t.sales_value?+t.sales_value:null};
  const ex=Object.keys(by).filter(k=>k!=='__common'),C=by.__common||[];
@@ -77,5 +77,5 @@ function salesV(){const M=salesMonths();if(!smon)smon=M[0]||'';const all=can(U,'
  ${all?`<div class="card tw"><h2>Common sales orders (house / common accounts)</h2><table><tr><th>SO no</th><th>Customer</th><th>Invoices</th><th>Qty</th><th>Value</th><th>ERP executive field</th></tr>${Object.values(C.reduce((g,l)=>{const k=(l.so_no||'—')+'|'+(l.customer_name||'');(g[k]=g[k]||[]).push(l);return g},{})).map(a=>`<tr><td>${esc(a[0].so_no||'—')}</td><td>${esc(a[0].customer_name||cname(a[0].customer_id))}</td><td>${esc([...new Set(a.map(l=>l.invoice_no))].join(', '))}</td><td>${sum(a,'qty')}</td><td>${inr(sum(a,'value'))}</td><td>${esc(a[0].exec_raw||'(blank)')}</td></tr>`).join('')||'<tr><td>None</td></tr>'}</table></div>`:''}
  ${filt.sx?`<div class="card tw"><h2>Lines — ${esc(pname(filt.sx))}</h2><table><tr><th>Date</th><th>Invoice</th><th>SO</th><th>Customer</th><th>SKU</th><th>Qty</th><th>Unit</th><th>Value</th></tr>${(by[filt.sx]||[]).map(l=>`<tr><td>${fd(l.invoice_date)}</td><td>${esc(l.invoice_no)}</td><td>${esc(l.so_no)}</td><td>${esc(l.customer_name||cname(l.customer_id))}</td><td>${esc(l.sku)}</td><td>${l.qty}</td><td>${esc(l.unit)}</td><td>${inr(l.value)}</td></tr>`).join('')}</table></div>`:''}`}
 window.bind_sales=()=>{const s=$('#smon');if(s)s.onchange=()=>{smon=s.value;filt.sx='';render()};document.querySelectorAll('[data-sx]').forEach(a=>a.onclick=e=>{e.preventDefault();filt.sx=filt.sx===a.dataset.sx?'':a.dataset.sx;render()})};
-window.histTabs=()=>[...(can(U,'full')||can(U,'inc_own')?[['sales','Sales (ERP)']]:[]),...(can(U,'hist')?[['hist','Import data']]:[])];
+window.histTabs=()=>[...(can(U,'full')||can(U,'inc_own')||can(U,'sales_view')?[['sales','Sales (ERP)']]:[]),...(can(U,'hist')?[['hist','Import data']]:[])];
 window.VIEWS={...(window.VIEWS||{}),hist:histV,sales:salesV};
