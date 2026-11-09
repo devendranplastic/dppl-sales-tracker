@@ -16,13 +16,13 @@ costing (costing sheets, feasibility, margins, sample tech approval) · factory_
 
 ## Connect Supabase
 1. Create a Supabase project (region: Mumbai).
-2. SQL editor → run `supabase/schema.sql`, then `supabase/storage.sql` (PO file bucket).
+2. SQL editor → paste and run `supabase/setup_all.sql` (schema + messages + PO file bucket, safe to re-run).
 3. Authentication → Users → add the six DPPL users (hr@, md@, balaji@, nathan@, jesaon@, suresh@devendranplastic.com) with passwords set in Supabase only.
    Then run `supabase/seed_users.sql` (sets roles/names; lists any email not yet created). Never commit passwords.
 4. Optional (to invite users from the app): install Supabase CLI, `supabase login`, `supabase link --project-ref <ref>`, `supabase functions deploy invite-user`.
    Optionally `supabase secrets set SITE_URL=https://popkalis-nandu.github.io/dppl-sales-tracker/`. Also set Authentication → URL configuration → Site URL to the live URL.
    Without the function: add users in Supabase → Authentication; they appear in Setup → Users to assign roles.
-5. Put Project URL + anon (public) key in `config.js` (`SUPABASE_URL`, `SUPABASE_ANON_KEY`), commit, push. The anon key is designed to be public; security is enforced by RLS.
+5. URL + publishable key are already in `config.js`; set `USE_SUPABASE: true`, commit, push. The anon key is designed to be public; security is enforced by RLS.
 6. Delete the `[SAMPLE]` rows when going live.
 
 ## Security (Supabase mode)
@@ -33,4 +33,4 @@ Invoices/collections/targets/visits: own (and direct reports) for executives, al
 Every write is recorded in `audit_log` by trigger. Deactivated users lose all access.
 
 ## Tests
-- `supabase/test/local_stubs.sql` + `schema.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 46/46 role-switching checks pass (incl. broadcast messages); seed_users.sql verified.
+- `supabase/setup_all.sql` (one-shot: schema + storage; rebuild with `supabase/build_setup_all.sh`). `supabase/test/local_stubs.sql` + `setup_all.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 46/46 role-switching checks pass (incl. broadcast messages); seed_users.sql verified.

@@ -10,7 +10,7 @@ const ROLE={hr_admin:{broadcast:1,sku:1,sample:1,artwork:1,art_lock:1,order:1,re
 window.can=(u,p)=>!!(u&&(ROLE[u.role]||{})[p]);
 const TABLES=['messages','message_recipients','skus','samples','artworks','orders','order_stages','dispatches','complaints','customers','enquiries','specs','costings','quotations','activities','tasks','audit_log'];
 const cfg=window.DPPL_CONFIG||{};
-const useSB=!!(cfg.SUPABASE_URL&&cfg.SUPABASE_ANON_KEY&&window.supabase);
+const useSB=!!(cfg.USE_SUPABASE&&cfg.SUPABASE_URL&&cfg.SUPABASE_ANON_KEY&&window.supabase);
 const sb=useSB?window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY):null;
 const uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now()+''+Math.random();
 const LS={

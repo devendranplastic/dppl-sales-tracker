@@ -1,5 +1,8 @@
-// Fill these to switch from localStorage demo mode to Supabase.
-window.DPPL_CONFIG = { SUPABASE_URL: "", SUPABASE_ANON_KEY: "", MARGIN_MIN_PCT: 12,
+// Supabase project (publishable key is public by design; security is enforced by RLS in the database).
+// Set USE_SUPABASE: true only AFTER supabase/setup_all.sql has been run and users are created. false = local demo mode.
+window.DPPL_CONFIG = { USE_SUPABASE: false,
+  SUPABASE_URL: "https://ehwgyqnqpcknzecjrgdl.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_LppOa3TcG9FroOpN-7XtJw_CQftI3jR", MARGIN_MIN_PCT: 12,
   // Marketing discipline rules
   MIN_NEW_CUSTOMER_VISITS_PER_MONTH: 1, MIN_NEW_CUSTOMERS_PER_3_MONTHS: 1, AT_RISK_DAYS_LEFT: 7,
   // Defaults only — HR Admin edits live values in Setup > Visit settings / Targets
