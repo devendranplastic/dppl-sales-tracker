@@ -405,6 +405,126 @@ language sql stable security definer set search_path=public as $$
   select w.id, w.enq_no, w.owner_id, w.customer_id, w.qty, w.val, case when is_full() then w.m end, r.name, coalesce(round(w.val*r.pct/100,2),0)
   from w left join lateral (select * from incentive_rules r where w.qty>=r.min_qty and w.val>=r.min_value and w.m>=r.margin_from and w.m<r.margin_to order by r.created_at limit 1) r on true $$;
 
+-- ---------- Sales register (all-in-one Tally upload): customers by GSTIN, product variants, invoices + lines, customer -> marketing owner
+create or replace function norm_key(t text) returns text language sql immutable as $$ select regexp_replace(lower(coalesce(t,'')),'[^a-z0-9]','','g') $$;
+alter table customers add column if not exists gstins text[] not null default '{}';
+alter table customers add column if not exists exec_id uuid references profiles(id);
+alter table customers add column if not exists source text;
+create index if not exists customers_gstins_gin on customers using gin(gstins);
+create table if not exists product_variants(id uuid primary key default gen_random_uuid(), name text not null, key text not null unique, category text not null default 'Packaging',
+  active boolean not null default true, created_at timestamptz default now(), updated_at timestamptz default now());
+alter table sales_uploads add column if not exists kind text not null default 'erp';
+create table if not exists sales_invoices(id uuid primary key default gen_random_uuid(), upload_id uuid not null references sales_uploads on delete cascade, month text not null, invoice_no text not null,
+  invoice_date date, customer_id uuid references customers, customer_name text, gstin text, so_no text, exec_id uuid references profiles(id), exec_raw text, exec_source text, is_common boolean not null default false,
+  is_credit_note boolean not null default false, is_cancelled boolean not null default false, lines int, qty numeric, value numeric, cgst numeric, sgst numeric, igst numeric, freight numeric, tcs numeric,
+  round_off numeric, gross_total numeric, remarks text, created_at timestamptz default now(), updated_at timestamptz default now());
+create unique index if not exists sales_invoices_no on sales_invoices(lower(trim(invoice_no)));
+create index if not exists sales_invoices_month on sales_invoices(month); create index if not exists sales_invoices_cust on sales_invoices(customer_id);
+alter table sales_lines add column if not exists sales_invoice_id uuid references sales_invoices on delete cascade;
+alter table sales_lines add column if not exists line_no int;
+alter table sales_lines add column if not exists gstin text;
+alter table sales_lines add column if not exists variant text;
+alter table sales_lines add column if not exists category text;
+alter table sales_lines add column if not exists rate numeric;
+alter table sales_lines add column if not exists is_credit_note boolean not null default false;
+alter table sales_lines add column if not exists exec_source text;
+alter table sales_lines add column if not exists tax numeric;
+alter table sales_lines add column if not exists gross_total numeric;
+create index if not exists sales_lines_cust on sales_lines(customer_id);
+-- only management may change who owns a customer
+create or replace function trg_cust_owner() returns trigger language plpgsql as $$
+begin if new.exec_id is distinct from old.exec_id and not is_full() then raise exception 'Only HR Admin / MD can change the customer''s marketing owner'; end if; return new; end $$;
+drop trigger if exists t_cust_owner on customers; create trigger t_cust_owner before update on customers for each row execute function trg_cust_owner();
+do $$ declare t text; begin foreach t in array array['product_variants','sales_invoices'] loop
+  execute format('alter table %I enable row level security',t);
+  execute (select coalesce(string_agg(format('drop policy if exists %I on %I;',policyname,t),' '),'select 1') from pg_policies where schemaname='public' and tablename=t);
+  execute format('create policy adm_%1$s on %1$I for all using (is_admin()) with check (is_admin())',t); end loop; end $$;
+drop trigger if exists t_audit on product_variants; create trigger t_audit after insert or update or delete on product_variants for each row execute function trg_audit();
+create policy r_pv on product_variants for select using (signed_in());
+-- invoices from the register follow the sales_lines rule: management all, marketing own/team, accounts read
+create policy r_si on sales_invoices for select using (is_full() or exec_id in (select my_team()));
+create policy acc_si_r on sales_invoices for select using (has_role('accounts'));
+
+-- One month of the register per call (atomic). Re-uploading a month replaces it, so the same file never duplicates.
+create or replace function import_sales_register(p_month text, p_file text, p_rows jsonb) returns jsonb language plpgsql set search_path=public as $$
+declare r record; v_cid uuid; n_new int:=0; n_match int:=0; n_var int:=0; n_sku int:=0; up uuid; n_inv int; n_lines int; v_val numeric; v_qty numeric;
+begin
+  if not is_admin() then raise exception 'Only HR Admin can import the sales register'; end if;
+  if p_month is null or p_month !~ '^\d{4}-\d{2}$' then raise exception 'Bad month %', p_month; end if;
+  if to_regclass('pg_temp._reg') is not null then drop table pg_temp._reg; end if;
+  create temp table _reg as select x.*, null::uuid cid, null::uuid xid, null::text xsrc
+    from jsonb_to_recordset(p_rows) as x(src_row int, inv_no text, inv_date date, customer text, gstin text, customer_code text, variant text, category text, qty numeric, rate numeric, value numeric,
+      gross_total numeric, cgst numeric, sgst numeric, igst numeric, freight numeric, tcs numeric, round_off numeric, exec text, so_no text, sku_code text, remarks text, cancelled boolean, credit_note boolean, line_no int);
+  update _reg set gstin=nullif(upper(trim(gstin)),''), customer=trim(customer), inv_no=trim(inv_no), customer_code=nullif(trim(customer_code),''), exec=nullif(trim(exec),''),
+    cancelled=coalesce(cancelled,false), credit_note=coalesce(credit_note,false);
+  if exists(select 1 from _reg where inv_no is null or inv_no='' or inv_date is null) then raise exception 'Every row needs Inv No and Date'; end if;
+  if exists(select 1 from _reg where to_char(inv_date,'YYYY-MM')<>p_month) then raise exception 'Rows outside % in this batch', p_month; end if;
+  -- replace the month (and any of these invoice numbers filed under another month)
+  delete from sales_uploads where month=p_month;
+  delete from sales_invoices where lower(trim(invoice_no)) in (select lower(inv_no) from _reg);
+  -- customers: code -> GSTIN (any of the customer's GSTINs) -> same PAN (GSTIN chars 3-12) -> name; new ones are created
+  for r in select distinct on (k) customer, gstin, customer_code from (select g.*, coalesce(g.gstin,norm_key(g.customer)) k, count(*) over (partition by coalesce(g.gstin,norm_key(g.customer)), norm_key(g.customer)) nn
+           from _reg g where not g.cancelled and coalesce(g.customer,'')<>'') z order by k, nn desc, src_row loop  -- new customer takes the most-used spelling for that GSTIN
+    v_cid:=null;
+    if r.customer_code is not null then select id into v_cid from customers where lower(customer_code)=lower(r.customer_code) limit 1; end if;
+    if v_cid is null and r.gstin is not null then select id into v_cid from customers where upper(gstin)=r.gstin or r.gstin=any(gstins) order by created_at limit 1; end if;
+    if v_cid is null and length(r.gstin)=15 then select id into v_cid from customers where exists(select 1 from unnest(gstins||gstin) x where substr(x,3,10)=substr(r.gstin,3,10)) order by created_at limit 1; end if; -- same PAN = same company, other state/branch
+    if v_cid is null then select id into v_cid from customers where norm_key(name)=norm_key(r.customer) order by created_at limit 1; end if;
+    if v_cid is null then
+      insert into customers(name,mobile,gstin,gstins,customer_code,source,created_by) values(r.customer,'',r.gstin,case when r.gstin is null then '{}' else array[r.gstin] end,r.customer_code,'sales register',auth.uid()) returning id into v_cid; n_new:=n_new+1;
+    else n_match:=n_match+1;
+      if r.gstin is not null then update customers set gstins=case when r.gstin=any(gstins) then gstins else gstins||r.gstin end, gstin=coalesce(nullif(gstin,''),r.gstin)
+        where id=v_cid and (not (r.gstin=any(gstins)) or coalesce(gstin,'')=''); end if; end if;
+  end loop;
+  update _reg g set cid=coalesce(
+    (select id from customers c where g.customer_code is not null and lower(c.customer_code)=lower(g.customer_code) limit 1),
+    (select id from customers c where g.gstin is not null and (upper(c.gstin)=g.gstin or g.gstin=any(c.gstins)) order by created_at limit 1),
+    (select id from customers c where length(g.gstin)=15 and exists(select 1 from unnest(c.gstins||c.gstin) x where substr(x,3,10)=substr(g.gstin,3,10)) order by created_at limit 1),
+    (select id from customers c where norm_key(c.name)=norm_key(g.customer) order by created_at limit 1));
+  -- product variants (Tally "Varient") and optional customer SKU codes
+  insert into product_variants(name,key,category) select distinct on (norm_key(variant)) trim(variant), norm_key(variant), coalesce(nullif(category,''),'Packaging') from _reg
+    where norm_key(variant)<>'' order by norm_key(variant), src_row on conflict (key) do nothing; get diagnostics n_var=row_count;
+  insert into skus(customer_id,sku_code,description) select distinct on (g.cid, g.sku_code) g.cid, trim(g.sku_code), g.variant from _reg g where g.cid is not null and coalesce(trim(g.sku_code),'')<>''
+    on conflict (customer_id,sku_code) do nothing; get diagnostics n_sku=row_count;
+  -- marketing person: file column (alias table, then email/name/emp code) -> customer owner -> unassigned (common)
+  update _reg g set xid=a.exec_id, xsrc=case when a.is_common then 'file-common' else 'file' end from exec_aliases a where g.exec is not null and a.alias=norm_key(g.exec);
+  update _reg g set xid=p.id, xsrc='file' from profiles p where g.xsrc is null and g.exec is not null
+    and norm_key(g.exec) in (norm_key(p.email),norm_key(p.full_name),norm_key(split_part(p.email,'@',1)),nullif(norm_key(p.emp_code),''));
+  update _reg g set xid=c.exec_id, xsrc='customer' from customers c where g.xsrc is null and c.id=g.cid and c.exec_id is not null;
+  select coalesce(sum(value),0), coalesce(sum(qty),0) into v_val, v_qty from _reg where not cancelled;
+  insert into sales_uploads(month,file_name,rows,total_value,kind) values(p_month,p_file,(select count(*) from _reg where not cancelled),v_val,'register') returning id into up;
+  insert into sales_invoices(upload_id,month,invoice_no,invoice_date,customer_id,customer_name,gstin,so_no,exec_id,exec_raw,exec_source,is_common,is_credit_note,is_cancelled,lines,qty,value,cgst,sgst,igst,freight,tcs,round_off,gross_total,remarks)
+  select up,p_month,min(inv_no),min(inv_date),(array_agg(cid order by line_no))[1],(array_agg(customer order by line_no))[1],(array_agg(gstin order by line_no))[1],
+    string_agg(distinct so_no,', '),(array_agg(xid order by line_no))[1],(array_agg(exec order by line_no))[1],(array_agg(xsrc order by line_no))[1],(array_agg(xid order by line_no))[1] is null,
+    bool_or(credit_note),bool_and(cancelled),count(*) filter (where not cancelled),sum(qty),sum(value),sum(cgst),sum(sgst),sum(igst),sum(freight),sum(tcs),sum(round_off),sum(gross_total),string_agg(distinct remarks,'; ')
+  from _reg group by lower(inv_no); get diagnostics n_inv=row_count;
+  insert into sales_lines(upload_id,month,invoice_no,invoice_date,customer_code,customer_name,customer_id,sku,qty,unit,value,so_no,exec_raw,exec_id,is_common,
+    sales_invoice_id,line_no,gstin,variant,category,rate,is_credit_note,exec_source,tax,gross_total)
+  select up,p_month,g.inv_no,g.inv_date,g.customer_code,g.customer,g.cid,coalesce(nullif(trim(g.sku_code),''),g.variant),g.qty,case when g.qty is not null then 'kg' end,coalesce(g.value,0),g.so_no,g.exec,g.xid,g.xid is null,
+    si.id,g.line_no,g.gstin,g.variant,g.category,g.rate,g.credit_note,g.xsrc,coalesce(g.cgst,0)+coalesce(g.sgst,0)+coalesce(g.igst,0),g.gross_total
+  from _reg g join sales_invoices si on lower(trim(si.invoice_no))=lower(g.inv_no) where not g.cancelled; get diagnostics n_lines=row_count;
+  drop table pg_temp._reg;
+  return jsonb_build_object('month',p_month,'lines',n_lines,'invoices',n_inv,'customers_new',n_new,'customers_matched',n_match,'variants_new',n_var,'skus_new',n_sku,'value',v_val,'qty',v_qty,
+    'credit_notes',(select count(*) from sales_invoices where upload_id=up and is_credit_note),'cancelled',(select count(*) from sales_invoices where upload_id=up and is_cancelled),
+    'unassigned_lines',(select count(*) from sales_lines where upload_id=up and exec_id is null));
+end $$;
+
+-- Assign customers to marketing persons in bulk: p = [{"customer_id":..,"exec_id":.. or null}]. Re-tags that customer's register sales
+-- (rows whose marketing person came from the file itself are left alone). exec_id null = common / unassigned.
+create or replace function assign_customer_execs(p jsonb) returns int language plpgsql set search_path=public as $$
+declare r record; n int:=0;
+begin
+  if not is_admin() then raise exception 'Only HR Admin can assign customer owners'; end if;
+  for r in select * from jsonb_to_recordset(p) as x(customer_id uuid, exec_id uuid) loop
+    if r.exec_id is not null and not exists(select 1 from profiles where id=r.exec_id and role='marketing') then raise exception 'Not a marketing person: %', r.exec_id; end if;
+    update customers set exec_id=r.exec_id where id=r.customer_id and exec_id is distinct from r.exec_id;
+    update sales_lines set exec_id=r.exec_id, is_common=r.exec_id is null, exec_source=case when r.exec_id is null then null else 'customer' end
+      where customer_id=r.customer_id and coalesce(exec_source,'') not in ('file','file-common');
+    update sales_invoices set exec_id=r.exec_id, is_common=r.exec_id is null, exec_source=case when r.exec_id is null then null else 'customer' end
+      where customer_id=r.customer_id and coalesce(exec_source,'') not in ('file','file-common');
+    n:=n+1; end loop;
+  return n; end $$;
+
 -- ---------- grants (Supabase already grants these by default; explicit for clarity)
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;

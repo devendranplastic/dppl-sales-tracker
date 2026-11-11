@@ -1,0 +1,4 @@
+﻿Invoice no,Date,Customer code,Customer name,SKU,Qty,Unit,Value,Sales order no,Marketing executive
+EXAMPLE/DP/1/25-26,01-04-2025,EXAMPLE-C001,EXAMPLE - Sri Mahalakshmi Dairy Pvt. Ltd.,Milk,669.66,kg,108036.24,SO/25-26/001,nathan@devendranplastic.com
+EXAMPLE/DP/2/25-26,01-04-2025,EXAMPLE-C002,EXAMPLE - BOND POLYMERS,Scrap,3568.8,kg,53264.92,,
+EXAMPLE/DPPL/CN/1/25-26,03-04-2025,EXAMPLE-C003,EXAMPLE - Tvarur Oils & Fats Private Limited,Barrier-Oil,-69.4,kg,-13359.5,,Jesaon

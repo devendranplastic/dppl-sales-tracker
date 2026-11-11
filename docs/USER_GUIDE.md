@@ -64,6 +64,8 @@ HR Admin is the super admin. This role controls users, master data and imports.
 
 **Setup › Visit settings:** minimum visits per day, Sunday and holiday rules, and visit purposes.
 
+**Import/Export › Sales register (all-in-one) — easiest monthly upload:** upload the Tally sales register exactly as exported (Date, Particulars, Inv No, GSTIN/UIN, Varient, Quantity, Rate, Value, Gross Total, CGST, SGST, IGST, Freight, TCS, Rounded Off; optional Marketing Person, Sales Order No, SKU Code). Check the preview (rows, invoices, credit notes, new customers, months that will be replaced) and click **Import**. The app creates the customers (by GSTIN), product variants, invoices and sales lines. Re-uploading a month replaces it, so there are no duplicates. Under **Customer → marketing person** set each customer's owner once (or download the owner list, fill the Marketing Person column in Excel and upload it back); every month follows it. Unowned customers show as *Common / unassigned*. Templates: *Excel / CSV* buttons on the same card. The **Sales analysis** tab shows month-wise ₹ and kg, category, variants, top customers and marketing person vs target for each financial year.
+
 **Import/Export › HR import:** load customers, SKU details, previous order history and the **monthly ERP sales CSV**. When you upload the sales file, map each ERP salesman name to a marketing person, or to **Common sales order** for house accounts. The mapping is remembered for later months.
 
 **Actual cost:** enter the actual cost per kg per SKU each month. Incentives use the latest actual margin.
@@ -72,7 +74,7 @@ HR Admin is the super admin. This role controls users, master data and imports.
 
 **Messages:** use the bell › *New message* to send a notice to everyone or to selected roles.
 
-**Monthly routine (first working day):** upload the previous month's ERP sales CSV › check the alias mapping › set targets for the new month › enter actual costs › review Incentives › deactivate leavers.
+**Monthly routine (first working day):** upload the previous month's Tally sales register (Import/Export › Sales register) › check the alias mapping › set targets for the new month › enter actual costs › review Incentives › deactivate leavers.
 
 ---
 

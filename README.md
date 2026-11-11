@@ -46,4 +46,7 @@ Invoices/collections/targets/visits: own (and direct reports) for executives, al
 Every write is recorded in `audit_log` by trigger. Deactivated users lose all access.
 
 ## Tests
-- `supabase/setup_all.sql` (one-shot: schema + storage; rebuild with `supabase/build_setup_all.sh`). `supabase/test/local_stubs.sql` + `setup_all.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 82/82 role-switching checks pass (incl. messages, ERP sales, actual cost, dispatch plans, accounts, data-entry delegate, credit hold); seed_users.sql verified.
+- `supabase/setup_all.sql` (one-shot: schema + storage; rebuild with `supabase/build_setup_all.sh`). `supabase/test/local_stubs.sql` + `setup_all.sql` + `supabase/test/rls_test.sql` on plain Postgres 17: 82/82 role-switching checks pass, plus `supabase/test/register_test.sql` (23 sales-register checks, run after rls_test.sql) (incl. messages, ERP sales, actual cost, dispatch plans, accounts, data-entry delegate, credit hold); seed_users.sql verified.
+
+## Sales register (all-in-one monthly upload)
+See `docs/SALES_REGISTER.md`. Parser: `register.js` (browser + Node); UI: `register_ui.js`; DB: `import_sales_register`, `assign_customer_execs`, tables `sales_invoices`, `product_variants`. Templates in `samples/`.

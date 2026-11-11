@@ -1,0 +1,4 @@
+﻿Date,Particulars,Inv No,GSTIN/UIN,Varient,Quantity,Rate,Value,Gross Total,CGST,SGST,IGST,Freight,TCS,Rounded Off,Marketing Person,Sales Order No,SKU Code,Remarks
+01-04-2025,EXAMPLE - Sri Mahalakshmi Dairy Pvt. Ltd.,EXAMPLE/DP/1/25-26,33ABCCS2484C1ZN,Milk,669.66,161.33,108036.24,127483,9723.27,9723.27,,,,,nathan@devendranplastic.com,SO/25-26/001,MILK-500ML,EXAMPLE row - delete before upload
+01-04-2025,EXAMPLE - BOND POLYMERS,EXAMPLE/DP/2/25-26,33CFBPS1660E1ZR,Scrap,3568.8,14.93,53264.92,63482,4793.84,4793.84,,,629,0.4,,,,EXAMPLE row - blank Marketing Person = common / customer owner
+03-04-2025,EXAMPLE - Tvarur Oils & Fats Private Limited,EXAMPLE/DPPL/CN/1/25-26,33AAECT7561Q1ZP,Barrier-Oil,69.4,192.5,-13359.5,-15764,-1202.36,-1202.36,,,,,Jesaon,,,EXAMPLE credit note - negative Value
