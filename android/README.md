@@ -10,7 +10,7 @@ A small native WebView shell (Java, no Gradle and no AndroidX) around the web ap
 ```bash
 source /home/box/flutter-env.sh          # JAVA_HOME + ANDROID_HOME
 android/build.sh                          # -> dist/DPPL_Sales_Tracker.apk (signed)
-VERSION_NAME=1.0.1 VERSION_CODE=2 android/build.sh       # next release (bump VERSION_CODE every time)
+VERSION_NAME=1.2.0 VERSION_CODE=3 android/build.sh       # next release (current: 1.1.0 / 2) (bump VERSION_CODE every time)
 APP_URL=https://<your-site>.netlify.app/ android/build.sh  # load a hosted site instead of the bundled files
 ```
 - **Default `APP_URL=local`:** the web files (`index.html`, `*.js`, `style.css`, `assets/`) are bundled into the APK, together with pinned copies of supabase-js 2.119.0, SheetJS 0.20.3 and Chart.js 4.4.4. They are served at `https://appassets.androidplatform.net/www/`, so the app starts quickly, and Supabase stays the live backend through `config.js`. **Rebuild the APK whenever the web app changes.**
