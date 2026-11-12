@@ -4,7 +4,7 @@ const nk=REG.nk,sum=(a,f)=>a.reduce((s,x)=>s+(+(typeof f==='function'?f(x):x[f])
 const kg=n=>Number(Math.round(n||0)).toLocaleString('en-IN')+' kg';
 const cr=n=>{const v=+n||0;return Math.abs(v)>=1e7?'₹'+(v/1e7).toFixed(2)+' Cr':Math.abs(v)>=1e5?'₹'+(v/1e5).toFixed(2)+' L':inr(Math.round(v))};
 let RG={p:null,file:'',busy:false,msg:'',res:null,onlyUn:true,q:'',chg:{}};
-const mkt=()=>(D.profiles||[]).filter(p=>p.role==='marketing');
+const mkt=()=>(D.profiles||[]).filter(p=>(p.role==='marketing'||(p.caps||[]).includes('sales_person')));
 // ---------- templates (same content as samples/*.csv)
 const SEP={
  customers:{file:'customers',head:['Customer code','Customer name','Mobile','City','Segment','GSTIN','Contact person'],ex:[['EXAMPLE-C001','EXAMPLE - Sri Mahalakshmi Dairy Pvt. Ltd.','9840000001','Chennai','Dairy','33ABCCS2484C1ZN','Purchase manager'],['EXAMPLE-C002','EXAMPLE - BOND POLYMERS','9840000002','Chennai','Scrap buyer','33CFBPS1660E1ZR',''],['EXAMPLE-C003','EXAMPLE - Tvarur Oils & Fats Private Limited','9840000003','Madurai','Edible oil','33AAECT7561Q1ZP','']]},

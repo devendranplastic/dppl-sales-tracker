@@ -5,12 +5,12 @@ const nk=CWS.nk,sum=(a,f)=>a.reduce((s,x)=>s+(+(typeof f==='function'?f(x):x[f])
 const kg=n=>Number(Math.round(n||0)).toLocaleString('en-IN')+' kg';
 const lk=n=>{const v=+n||0;return Math.abs(v)>=1e5?(v/1e5).toFixed(2)+' L kg':kg(v)};   // lakh kg
 const gp=(c,l)=>l?(c-l)/Math.abs(l)*100:null,fp=p=>p==null?'—':(p>=0?'+':'')+p.toFixed(1)+'%',pc=p=>p==null?'':p>=0?'ok':'bad';
-const mkt=()=>(D.profiles||[]).filter(p=>p.role==='marketing'&&p.active!==false);
+const mkt=()=>(D.profiles||[]).filter(p=>(p.role==='marketing'||(p.caps||[]).includes('sales_person'))&&p.active!==false);
 const isMk=()=>U&&U.role==='marketing';
 // customer-level rows for everyone (non-marketing); marketing only ever has their own customers' rows (RLS)
 const cwsAll=()=>!isMk()&&(can(U,'full')||can(U,'sales_view')||can(U,'io_sales')||U.role==='accounts');window.cwsAll=cwsAll;
-// person-level team view (no customer names): Balaji (targets cap) sees every person's kg through kg_by_person()
-const cwsTeam=()=>cwsAll()||(isMk()&&can(U,'targets'));window.cwsTeam=cwsTeam;
+// person-level team view: non-marketing roles only (v1.8: marketing see only themselves)
+const cwsTeam=()=>cwsAll();window.cwsTeam=cwsTeam;
 const prevFy=fy=>{const y=+fy.slice(0,4)-1;return `${y}-${String((y+1)%100).padStart(2,'0')}`};
 const FY_OPTS=()=>{const y=new Date().getFullYear();return [...Array(9)].map((_,i)=>{const a=y-6+i;return `${a}-${String((a+1)%100).padStart(2,'0')}`})};
 const fyOfToday=()=>{const d=new Date(),y=d.getMonth()>=3?d.getFullYear():d.getFullYear()-1;return `${y}-${String((y+1)%100).padStart(2,'0')}`};

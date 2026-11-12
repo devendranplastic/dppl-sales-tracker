@@ -678,5 +678,115 @@ revoke all on function cust_mine(uuid) from public, anon; grant execute on funct
 drop policy if exists cap_cust_i on customers; create policy cap_cust_i on customers for insert with check (has_cap('customers'));
 drop policy if exists cap_cust_u on customers; create policy cap_cust_u on customers for update using (has_cap('customers'));
 
+-- ---------- v1.8.0: marketing (Nathan, Jesaon, Suresh, Sanjeev) see only their own person-level data; Balaji = CEO (full view) but still a sales person
+create or replace function is_seller(u uuid) returns boolean language sql stable security definer set search_path=public as
+ $$ select exists(select 1 from profiles where id=u and (role='marketing' or 'sales_person'=any(coalesce(caps,'{}')))) $$;
+grant execute on function is_seller(uuid) to authenticated;
+create or replace function enq_mine(e uuid) returns boolean language sql stable security definer set search_path=public as
+ $$ select exists(select 1 from enquiries where id=e and owner_id=auth.uid()) $$;
+grant execute on function enq_mine(uuid) to authenticated;
+-- targets may be set for any sales person (marketing role or sales_person cap)
+drop policy if exists cap_tgt on targets;
+create policy cap_tgt on targets for all using (has_cap('targets')) with check (has_cap('targets') and is_seller(exec_id));
+-- restrictive own-person rules for role=marketing
+do $$ declare t text; begin
+  foreach t in array array['enquiries','tasks'] loop
+    execute format('drop policy if exists mk_self_%1$s on %1$s', t);
+    execute format('create policy mk_self_%1$s on %1$s as restrictive for all to authenticated using (not is_mkt() or owner_id=auth.uid()) with check (not is_mkt() or owner_id=auth.uid())', t);
+  end loop;
+  foreach t in array array['quotations','specs','activities'] loop
+    execute format('drop policy if exists mk_self_%1$s on %1$s', t);
+    execute format('create policy mk_self_%1$s on %1$s as restrictive for all to authenticated using (not is_mkt() or enquiry_id is null or enq_mine(enquiry_id)) with check (not is_mkt() or enquiry_id is null or enq_mine(enquiry_id))', t);
+  end loop;
+  drop policy if exists mk_self_visits on visits;
+  create policy mk_self_visits on visits as restrictive for all to authenticated using (not is_mkt() or by_id=auth.uid()) with check (not is_mkt() or by_id=auth.uid());
+  drop policy if exists mk_self_targets on targets;
+  create policy mk_self_targets on targets as restrictive for select to authenticated using (not is_mkt() or exec_id=auth.uid());
+  foreach t in array array['customerwise_sales','sales_lines','sales_invoices','invoices'] loop
+    execute format('drop policy if exists mk_self_%1$s on %1$s', t);
+    execute format('create policy mk_self_%1$s on %1$s as restrictive for select to authenticated using (not is_mkt() or exec_id is null or exec_id=auth.uid())', t);
+  end loop;
+  -- other marketing people's profiles are hidden from marketing (names of non-marketing staff stay visible)
+  drop policy if exists mk_self_profiles on profiles;
+  create policy mk_self_profiles on profiles as restrictive for select to authenticated using (not is_mkt() or id=auth.uid() or role<>'marketing');
+end $$;
+-- aggregates: marketing get only their own person
+create or replace function kg_by_person() returns table(fy text, month text, exec_id uuid, kg numeric) language sql stable security definer set search_path=public as $$
+ select s.fy, s.month, s.exec_id, sum(s.qty) from customerwise_sales s
+ where auth.uid() is not null and (s.exec_id = auth.uid() or (not is_mkt() and (is_full() or has_role('accounts') or has_cap('sales_import') or has_cap('targets'))))
+ group by 1,2,3 order by 2 $$;
+create or replace function team_kg_monthly() returns table(fy text, month text, kg numeric, target_kg numeric) language sql stable security definer set search_path=public as $$
+ with a as (select fy, month, sum(qty) kg from customerwise_sales where not is_mkt() or exec_id=auth.uid() group by fy, month),
+      t as (select period as month, sum(qty) as target_kg from targets where period ~ '^\d{4}-\d{2}$' and qty is not null and (not is_mkt() or exec_id=auth.uid()) group by period)
+ select coalesce(a.fy, case when substr(t.month,6,2)::int>=4 then substr(t.month,1,4)||'-'||lpad(((substr(t.month,1,4)::int+1)%100)::text,2,'0') else (substr(t.month,1,4)::int-1)::text||'-'||substr(t.month,3,2) end) as fy,
+        coalesce(a.month, t.month) as month, coalesce(a.kg,0) as kg, t.target_kg
+ from a full join t on t.month = a.month where auth.uid() is not null order by 2 $$;
+grant execute on function kg_by_person() to authenticated;
+grant execute on function team_kg_monthly() to authenticated;
+
+CREATE OR REPLACE FUNCTION public.import_customerwise(p_fy text, p_file text, p_sheet text, p_rows jsonb, p_sync_owners boolean DEFAULT true)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare r record; v_cid uuid; n_new int:=0; up uuid; v_qty numeric; n_rows int; v_sync jsonb:='{}'; v_from text; v_to text;
+begin
+  if not (is_admin() or has_cap('sales_import')) then raise exception 'Only HR Admin or a user with the sales-upload permission can import customerwise sales'; end if;
+  if p_fy is null or p_fy !~ '^\d{4}-\d{2}$' or (substr(p_fy,1,4)::int+1)%100<>substr(p_fy,6,2)::int then raise exception 'Bad financial year % (use 2025-26)', p_fy; end if;
+  v_from:=substr(p_fy,1,4)||'-04'; v_to:=(substr(p_fy,1,4)::int+1)||'-03';
+  if to_regclass('pg_temp._cw') is not null then drop table pg_temp._cw; end if;
+  create temp table _cw as select x.*, null::uuid cid, null::uuid xid from jsonb_to_recordset(p_rows) as x(src_row int, exec text, exec_id uuid, product text, customer text, customer_id uuid, month text, qty numeric);
+  update _cw set customer=nullif(regexp_replace(trim(customer),'\s+',' ','g'),''), exec=nullif(trim(exec),''), product=nullif(trim(product),'');
+  if exists(select 1 from _cw where customer is null or qty is null or month is null) then raise exception 'Every row needs Customer Name, month and quantity'; end if;
+  if exists(select 1 from _cw where month !~ '^\d{4}-\d{2}$' or month<v_from or month>v_to) then raise exception 'Rows outside FY % (Apr % – Mar %)', p_fy, v_from, v_to; end if;
+  -- customers: app suggestion (if it exists) -> exact name / saved alias -> create
+  update _cw g set cid=g.customer_id where g.customer_id is not null and exists(select 1 from customers c where c.id=g.customer_id);
+  update _cw g set cid=(select id from customers c where norm_key(c.name)=norm_key(g.customer) or norm_key(g.customer)=any(select norm_key(a) from unnest(c.name_aliases) a) order by created_at limit 1) where g.cid is null;
+  for r in select distinct on (norm_key(customer)) customer from _cw where cid is null order by norm_key(customer), src_row loop
+    insert into customers(name,mobile,source,created_by) values(r.customer,'','customerwise sales',auth.uid()) returning id into v_cid; n_new:=n_new+1;
+    update _cw set cid=v_cid where cid is null and norm_key(customer)=norm_key(r.customer); end loop;
+  -- remember the file's spelling so next month's upload matches exactly
+  update customers c set name_aliases=c.name_aliases||a.names from (select cid, array_agg(distinct customer) names from _cw g group by cid) a
+    where c.id=a.cid and not (a.names <@ (c.name_aliases||c.name));
+  -- marketing person: app suggestion (must be a marketing profile) -> saved alias -> name / email / emp code; unknown names stay as text (exec_raw)
+  update _cw g set xid=g.exec_id from profiles p where g.exec_id is not null and p.id=g.exec_id and is_seller(p.id);
+  update _cw g set xid=a.exec_id from exec_aliases a where g.xid is null and g.exec is not null and a.alias=norm_key(g.exec) and not a.is_common;
+  update _cw g set xid=p.id from profiles p where g.xid is null and g.exec is not null and is_seller(p.id)
+    and norm_key(g.exec) in (norm_key(p.full_name),norm_key(split_part(p.email,'@',1)),norm_key(p.email),nullif(norm_key(p.emp_code),''));
+  insert into exec_aliases(alias,raw_name,exec_id) select distinct on (norm_key(exec)) norm_key(exec), exec, xid from _cw where xid is not null and exec is not null and norm_key(exec)<>''
+    order by norm_key(exec) on conflict (alias) do update set exec_id=excluded.exec_id, raw_name=excluded.raw_name, is_common=false;
+  delete from customerwise_uploads where fy=p_fy;
+  select coalesce(sum(qty),0), count(*) into v_qty, n_rows from _cw;
+  insert into customerwise_uploads(fy,file_name,sheet,lines,rows,total_qty,months_covered)
+    values(p_fy,p_file,p_sheet,(select count(distinct src_row) from _cw),n_rows,v_qty,(select coalesce(array_agg(distinct month order by month),'{}') from _cw)) returning id into up;
+  insert into customerwise_sales(upload_id,fy,month,customer_id,customer_name,product,exec_id,exec_raw,qty,src_row)
+    select up,p_fy,month,cid,customer,product,xid,exec,qty,src_row from _cw;
+  if p_sync_owners then v_sync:=sync_customer_owners_from_cws(); end if;
+  return jsonb_build_object('fy',p_fy,'rows',n_rows,'lines',(select lines from customerwise_uploads where id=up),'qty',v_qty,'customers',(select count(distinct cid) from _cw),'customers_new',n_new,
+    'unmatched_execs',(select coalesce(jsonb_agg(distinct exec),'[]') from _cw where xid is null and exec is not null),
+    'by_exec',(select jsonb_object_agg(k,q) from (select coalesce(p.full_name,g.exec,'(blank)') k, sum(g.qty) q from _cw g left join profiles p on p.id=g.xid group by 1) z))||v_sync;
+end $function$;
+
+CREATE OR REPLACE FUNCTION public.assign_customer_execs(p jsonb)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+declare r record; n int:=0;
+begin
+  if not is_admin() then raise exception 'Only HR Admin can assign customer owners'; end if;
+  for r in select * from jsonb_to_recordset(p) as x(customer_id uuid, exec_id uuid) loop
+    if r.exec_id is not null and not exists(select 1 from profiles where id=r.exec_id and (role='marketing' or 'sales_person'=any(coalesce(caps,'{}')))) then raise exception 'Not a marketing person: %', r.exec_id; end if;
+    update customers set exec_id=r.exec_id where id=r.customer_id and exec_id is distinct from r.exec_id;
+    update sales_lines set exec_id=r.exec_id, is_common=r.exec_id is null, exec_source=case when r.exec_id is null then null else 'customer' end
+      where customer_id=r.customer_id and coalesce(exec_source,'') not in ('file','file-common');
+    update sales_invoices set exec_id=r.exec_id, is_common=r.exec_id is null, exec_source=case when r.exec_id is null then null else 'customer' end
+      where customer_id=r.customer_id and coalesce(exec_source,'') not in ('file','file-common');
+    n:=n+1; end loop;
+  return n; end $function$;
+
+-- live data change (v1.8, not part of a fresh install): Balaji -> role 'ceo' with caps {targets,broadcast,sales_person}
+
 -- ---------- make the first HR Admin (run separately, replace the placeholder; never commit a real email)
 -- update profiles set role='hr_admin' where email = 'HR_ADMIN_EMAIL_PLACEHOLDER';

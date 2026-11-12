@@ -7,7 +7,7 @@ function achieved(x,m){if(hasSL(m))return (D.sales_lines||[]).filter(l=>l.month=
  const w=D.enquiries.filter(e=>e.owner_id===x&&e.stage==='Won'&&(e.won_at||'').startsWith(m)&&!(D.orders||[]).some(o=>o.enquiry_id===e.id)).reduce((a,e)=>a+(+e.value||0),0);return o+w}
 const commonAch=m=>(D.sales_lines||[]).filter(l=>l.month===m&&(l.is_common||!l.exec_id)).reduce((a,l)=>a+(+l.value||0),0);
 const targetOf=(x,m)=>{const t=(D.targets||[]).find(t=>t.exec_id===x&&t.period===m);if(t&&t.sales_value)return +t.sales_value;const q=(D.targets||[]).find(t=>t.exec_id===x&&t.period===qOf(m));return q&&q.sales_value?+q.sales_value/3:0};
-const chartExecs=()=>can(U,'full')?(D.profiles||[]).filter(p=>p.role==='marketing'&&p.active!==false).map(p=>p.id):[ME()];
+const chartExecs=()=>can(U,'full')?(D.profiles||[]).filter(p=>(p.role==='marketing'||(p.caps||[]).includes('sales_person'))&&p.active!==false).map(p=>p.id):[ME()];
 window.chartsHtml=()=>{if(!(can(U,'full')||U.role==='marketing'))return'';if(!(D.sales_lines||[]).length&&!(D.targets||[]).some(t=>+t.sales_value)&&!(D.orders||[]).some(o=>o.released)&&!(D.enquiries||[]).some(e=>e.stage==='Won'))return''; // ₹ view only once there is ₹ data (ERP upload, ₹ targets, orders or won enquiries)
 const M=[...new Set([...monthsBack(12),...(D.sales_uploads||[]).map(u=>u.month)])].sort().reverse();if(!chMonth)chMonth=(window.lastUpload&&lastUpload()?.month)||[...new Set((D.sales_lines||[]).map(l=>l.month))].sort().pop()||M[0];
  const E=chartExecs(),rows=E.map(x=>({x,t:targetOf(x,chMonth),a:achieved(x,chMonth)}));const tt=rows.reduce((s,r)=>s+r.t,0),ta=rows.reduce((s,r)=>s+r.a,0)+(can(U,'full')?commonAch(chMonth):0);

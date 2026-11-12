@@ -64,7 +64,7 @@ function matcher(customers){const ex={},keys=[];const add=(n,c)=>{const e=nk(n),
   return best&&!amb?best:null};
  const f=name=>{for(const v of variants(name)){const r=one(v);if(r)return r}return null};f.learn=(n,c)=>add(n,c);return f}
 // marketing person: "Jeason" ~ Jesaon (profile full_name / email / emp code / saved alias)
-function execMatcher(profiles,aliases){const P=(profiles||[]).filter(p=>p.role==='marketing'),A={};(aliases||[]).forEach(a=>A[a.alias]=a);
+function execMatcher(profiles,aliases){const P=(profiles||[]).filter(p=>(p.role==='marketing'||(p.caps||[]).includes('sales_person'))),A={};(aliases||[]).forEach(a=>A[a.alias]=a);
  return raw=>{const k=nk(raw);if(!k)return{common:true};if(A[k])return A[k].is_common?{common:true,how:'alias'}:{id:A[k].exec_id,how:'alias'};
   const hit=P.find(p=>[p.full_name,(p.email||'').split('@')[0],p.email,p.emp_code].some(v=>v&&nk(v)===k)||nk((p.full_name||'').split(/\s+/)[0])===k);if(hit)return{id:hit.id,how:'name'};
   const f=P.map(p=>({p,d:Math.min(...[p.full_name,(p.email||'').split('@')[0]].filter(Boolean).map(v=>lev(nk(v),k)))})).filter(x=>x.d<=Math.max(1,Math.floor(k.length/4))).sort((a,b)=>a.d-b.d);

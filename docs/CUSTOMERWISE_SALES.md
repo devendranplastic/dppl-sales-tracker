@@ -64,3 +64,10 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
 - **Visits.** The customer box suggests only your own customers. You can still type a new prospect and choose **New**.
 - **New-customer rule.** The rule (≥1 new customer in 3 months) now counts customers **owned by** the person as well as those created by them, because info@ now adds the customers.
 - **Enquiries** are unchanged and visible team-wide.
+
+## v1.8.0: marketing people see only themselves; Balaji is CEO
+
+- **Who is restricted:** marketing logins (Nathan, Jesaon, Suresh/Surendren, Sanjeev). Each sees only their own person-level data. This covers enquiries and their quotations, specs and activities, plus tasks, visits, targets, customerwise kg, sales lines and invoices, ERP invoices and incentives. It also covers the `kg_by_person()` and `team_kg_monthly()` totals, which return only their own kg and targets. Other marketing people's profiles are hidden, so their names never appear.
+- **App changes for marketing:** the Marketing discipline card and the Executive / Marketing person filters are removed. The dashboard is "My volume" and the follow-up table is "My follow-up discipline". The enquiry owner is locked to the user.
+- **Balaji is now `ceo`, with the full team view everywhere, the same as MD.** His caps are `targets`, `broadcast` and `sales_person`. **sales_person** keeps him counted as a marketing person: he owns customers, gets kg targets, is matched by name in the customerwise / register imports, and appears in owner and target pickers.
+- **Unchanged:** all other roles keep their existing views.

@@ -12,7 +12,7 @@ const ROLE={hr_admin:{hist:1,actcost:1,dplan:1,dplan_edit:1,dplan_confirm:1,broa
 // capability flags (profiles.caps, set by HR Admin in Setup → Users) add permissions on top of the role
 const CAPS={sales_import:{io_sales:1,cws_view:1},targets:{targets:1,sales_view:1,cws_view:1},broadcast:{broadcast:1},customers:{cust:1}};
 ['hr_admin','md','ceo','accounts','marketing'].forEach(r=>ROLE[r].cws_view=1);ROLE.hr_admin.targets=1;ROLE.hr_admin.io_sales=1;
-window.CAP_LIST=[['sales_import','Upload sales files (register + customerwise)'],['targets','Manage all marketing targets'],['broadcast','Message everyone'],['customers','Add / edit customers and owners (info@)']];
+window.CAP_LIST=[['sales_import','Upload sales files (register + customerwise)'],['targets','Manage all marketing targets'],['broadcast','Message everyone'],['customers','Add / edit customers and owners (info@)'],['sales_person','Counts as a marketing person (owns customers, gets kg targets) — e.g. CEO']];
 window.can=(u,p)=>!!(u&&((ROLE[u.role]||{})[p]||(u.caps||[]).some(c=>(CAPS[c]||{})[p])));
 const TABLES=['customerwise_uploads','customerwise_sales','product_variants','sales_invoices','actual_costs','dispatch_plans','import_logs','customer_history','sales_uploads','sales_lines','exec_aliases','messages','message_recipients','skus','samples','artworks','orders','order_stages','dispatches','complaints','customers','enquiries','specs','costings','quotations','activities','tasks','audit_log'];
 const cfg=window.DPPL_CONFIG||{};
