@@ -40,3 +40,9 @@ Analysis: **Sales analysis** tab (top section) and a summary card on the MD / HR
 | `targets` | balaji@devendranplastic.com | Targets tab: create / edit / delete targets for **every** marketing person (database refuses non-marketing people); sees everyone's sales and kg to set them. |
 | `broadcast` | balaji@devendranplastic.com | Message everyone / selected roles like the MD, see read receipts, edit or delete own messages. |
 HR Admin implicitly has all flags. Flags are enforced by row-level security (`has_cap()`); the UI only hides what the database already refuses. Tests: `supabase/test/customerwise_test.sql` (52 checks).
+
+## Where the uploaded years show (v1.3.0)
+- **Sales analysis** – charts, plus a *Month-wise kg* table per marketing person for the selected FY (last year in the fold-out).
+- **Sales (ERP)** tab – a *Customerwise sales (kg)* card with an FY selector at the top (the ERP/Tally ₹ uploads stay below it).
+- **Customers** – *Kg FY current / last* columns, customers sorted by current-year kg.
+- The Tally register (₹ value) section notes which FYs have a register upload (currently FY 2024-25 only).
