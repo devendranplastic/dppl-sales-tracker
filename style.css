@@ -46,3 +46,4 @@ button{background:var(--red);color:#fff;border:0;border-radius:6px;padding:8px 1
  .auth{margin:4vh 12px;padding:20px}
 }
 .card{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+.pc{display:inline-block;padding:1px 6px;border-radius:8px;font-weight:700;font-size:12px}.pc.pg{background:#d9f2dd;color:#1b6b2a}.pc.pa{background:#fff0c2;color:#8a6100}.pc.pr{background:#fde0e0;color:#b3151a}table.tva td{white-space:nowrap;vertical-align:top}h3{color:var(--navy);font-size:15px;margin:14px 0 6px}
