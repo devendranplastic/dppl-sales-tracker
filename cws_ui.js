@@ -5,7 +5,8 @@ const nk=CWS.nk,sum=(a,f)=>a.reduce((s,x)=>s+(+(typeof f==='function'?f(x):x[f])
 const kg=n=>Number(Math.round(n||0)).toLocaleString('en-IN')+' kg';
 const lk=n=>{const v=+n||0;return Math.abs(v)>=1e5?(v/1e5).toFixed(2)+' L kg':kg(v)};   // lakh kg
 const gp=(c,l)=>l?(c-l)/Math.abs(l)*100:null,fp=p=>p==null?'—':(p>=0?'+':'')+p.toFixed(1)+'%',pc=p=>p==null?'':p>=0?'ok':'bad';
-const mkt=()=>(D.profiles||[]).filter(p=>p.role==='marketing');
+const mkt=()=>(D.profiles||[]).filter(p=>p.role==='marketing'&&p.active!==false);
+const cwsAll=()=>can(U,'full')||can(U,'sales_view')||can(U,'io_sales')||U.role==='accounts';window.cwsAll=cwsAll;
 const prevFy=fy=>{const y=+fy.slice(0,4)-1;return `${y}-${String((y+1)%100).padStart(2,'0')}`};
 const FY_OPTS=()=>{const y=new Date().getFullYear();return [...Array(9)].map((_,i)=>{const a=y-6+i;return `${a}-${String((a+1)%100).padStart(2,'0')}`})};
 const fyOfToday=()=>{const d=new Date(),y=d.getMonth()>=3?d.getFullYear():d.getFullYear()-1;return `${y}-${String((y+1)%100).padStart(2,'0')}`};
@@ -90,7 +91,7 @@ const xkey=r=>r.exec_id||(r.exec_raw?'raw:'+r.exec_raw:'(none)');
 const xlabel=k=>k.startsWith('raw:')?k.slice(4)+' (no login)':k==='(none)'?'Common / unassigned':pname(k);
 const ckey=r=>r.customer_id||'n:'+nk(r.customer_name);
 const clabel=(k,rows)=>k.startsWith('n:')?(rows.find(r=>ckey(r)===k)||{}).customer_name:cname(k);
-function caData(){const all=can(U,'full')||can(U,'sales_view')||can(U,'io_sales'),R=(D.customerwise_sales||[]).filter(r=>all||r.exec_id===ME()),FY=[...new Set(R.map(r=>r.fy))].sort().reverse();if(!FY.length)return null;if(!CA.fy||!FY.includes(CA.fy))CA.fy=FY[0];
+function caData(){const all=cwsAll(),R=(D.customerwise_sales||[]).filter(r=>all||r.exec_id===ME()),FY=[...new Set(R.map(r=>r.fy))].sort().reverse();if(!FY.length)return null;if(!CA.fy||!FY.includes(CA.fy))CA.fy=FY[0];
  const cy=CA.fy,ly=prevFy(cy),ly2=prevFy(ly),MS=CWS.fyMonths(cy),ML=CWS.fyMonths(ly),M2=CWS.fyMonths(ly2);
  let A=R;if(CA.x)A=A.filter(r=>xkey(r)===CA.x);if(CA.p)A=A.filter(r=>(r.product||'(blank)')===CA.p);
  const C=A.filter(r=>r.fy===cy),L=A.filter(r=>r.fy===ly),up=(D.customerwise_uploads||[]).find(u=>u.fy===cy);
@@ -105,7 +106,7 @@ function cmpRows(d,k){const c=grpQ(d.ytdC,k),l=grpQ(d.ytdL,k),lf=grpQ(d.L,k),cf=
 function movement(d){const R=cmpRows(d,ckey);return{rows:R,newC:R.filter(r=>r.c>0&&r.lf<=0),lost:R.filter(r=>r.c<=0&&r.l>0),grew:R.filter(r=>r.c>0&&r.l>0&&r.c>r.l),drop:R.filter(r=>r.c>0&&r.l>0&&r.c<r.l)}}
 function cwsAnalysisHtml(){if(!can(U,'cws_view'))return'';const d=caData();
  if(!d)return `<div class="card"><h2>Volume: last year vs this year (kg)</h2><p>No customerwise sales uploaded yet.${can(U,'io_sales')?` Upload the Customerwise Sales Details sheet on <a href="#" data-go="${can(U,'io')?'io':'supl'}:">${can(U,'io')?'Import / Export':'Sales uploads'}</a>.`:''}</p></div>`;
- const tc=sum(d.ytdC,'qty'),tl=sum(d.ytdL,'qty'),lfull=sum(d.L,'qty'),g=gp(tc,tl),mv=movement(d),mlab=CWS.MLAB[d.n-1],full=can(U,'full')||can(U,'sales_view')||can(U,'io_sales');
+ const tc=sum(d.ytdC,'qty'),tl=sum(d.ytdL,'qty'),lfull=sum(d.L,'qty'),g=gp(tc,tl),mv=movement(d),mlab=CWS.MLAB[d.n-1],full=cwsAll();
  const P=cmpRows(d,xkey).sort((a,b)=>b.c-a.c),PR=cmpRows(d,r=>r.product||'(blank)').sort((a,b)=>b.c-a.c),TC=mv.rows.filter(r=>r.c>0).sort((a,b)=>b.c-a.c);
  const X=[...new Set(d.R.map(xkey))],PP=[...new Set(d.R.map(r=>r.product||'(blank)'))].sort();
  const list=(a,t)=>`<details><summary>${t} (${a.length})</summary><table><tr><th>Customer</th><th>${d.ly} till ${mlab}</th><th>${d.cy} till ${mlab}</th><th>Change</th><th>${d.ly} full year</th></tr>${a.map(r=>`<tr><td>${esc(clabel(r.k,d.R))}</td><td>${kg(r.l)}</td><td>${kg(r.c)}</td><td class="${pc(r.g)}">${kg(r.c-r.l)} ${fp(r.g)}</td><td>${kg(r.lf)}</td></tr>`).join('')}</table></details>`;
@@ -149,14 +150,29 @@ function exportCA(){const d=caData();if(!d)return;const wb=XLSX.utils.book_new()
  XLSX.writeFile(wb,`DPPL_LY_vs_CY_FY${d.cy}.xlsx`)}
 function bindCA(){const f=$('#cafy');if(f)f.onchange=()=>{CA.fy=f.value;render()};const x=$('#cax');if(x)x.onchange=()=>{CA.x=x.value;render()};const p=$('#cap');if(p)p.onchange=()=>{CA.p=p.value;render()};const e=$('#caexp');if(e)e.onclick=exportCA;drawCA()}
 // ---------- MD dashboard card (management)
-function dashCard(){if(!(can(U,'full')||can(U,'targets')))return'';const d0=CA.x||CA.p;const s={...CA};CA.x='';CA.p='';const d=caData();Object.assign(CA,s);if(!d)return'';
- const tc=sum(d.ytdC,'qty'),tl=sum(d.ytdL,'qty'),g=gp(tc,tl),mlab=CWS.MLAB[d.n-1],P=cmpRows(d,xkey).sort((a,b)=>b.c-a.c);
- return `<div class="card"><h2>Volume FY ${d.cy} vs FY ${d.ly} — Apr to ${mlab} (kg)</h2><div class="grid"><div class="card">This year<div class="kpi">${lk(tc)}</div></div><div class="card">Last year same months<div class="kpi">${lk(tl)}</div></div><div class="card">Growth<div class="kpi ${pc(g)}">${fp(g)}</div></div>
- ${P.slice(0,6).map(r=>`<div class="card">${esc(xlabel(r.k))}<div class="kpi ${pc(r.g)}">${fp(r.g)}</div><small>${lk(r.c)} vs ${lk(r.l)}</small></div>`).join('')}</div>
- <div class="grid"><div><div style="position:relative;height:260px"><canvas id="cdMon" aria-label="Monthly kg LY vs CY"></canvas></div></div><div><div style="position:relative;height:260px"><canvas id="cdExec" aria-label="Kg by marketing person LY vs CY"></canvas></div></div></div>
- <small>From the customerwise sales file. Details: <a href="#" data-go="sana:">Sales analysis</a>.</small></div>${cwsKgTargetCard(true)}`}
+function dashCard(){if(!can(U,'cws_view'))return opsKgCard();const d=caAll();if(!d)return `<div class="card"><h2>Volume (kg)</h2><p>No customerwise sales uploaded yet.</p></div>`;
+ const team=cwsAll(),tc=sum(d.ytdC,'qty'),tl=sum(d.ytdL,'qty'),g=gp(tc,tl),mlab=CWS.MLAB[d.n-1],lm=d.MS[d.n-1],P=cmpRows(d,xkey).sort((a,b)=>b.c-a.c);
+ const lmC=sum(d.C.filter(r=>r.month===lm),'qty'),lmL=sum(d.L.filter(r=>r.month===d.ML[d.n-1]),'qty'),tq=(x,m)=>{const t=(D.targets||[]).find(t=>t.exec_id===x&&t.period===m);return t&&t.qty!=null?+t.qty:0};
+ const E=team?mkt().map(p=>p.id):[ME()],lmT=E.reduce((s,x)=>s+tq(x,lm),0),ytdT=E.reduce((s,x)=>s+d.MS.slice(0,d.n).reduce((a,m)=>a+tq(x,m),0),0);
+ const TC=team?[]:cmpRows(d,ckey).filter(r=>r.c>0).sort((a,b)=>b.c-a.c).slice(0,10);
+ const mm=new Date().toISOString().slice(0,7),myV=(D.visits||[]).filter(v=>(team||v.by_id===ME())&&(v.date||'').startsWith(mm)).length,myE=(D.enquiries||[]).filter(e=>(team||e.owner_id===ME())&&!['Won','Lost'].includes(e.stage)).length;
+ return `<div class="card"><h2>${team?'Team volume':'My volume — '+esc(pname(ME()))} · FY ${d.cy}</h2><p><span class="tag ok">Latest month: ${mlab}-${lm.slice(2,4)}</span> <small>Year to date = Apr to ${mlab} (the last month uploaded). Months after ${mlab} show as pending upload.</small></p>
+ <div class="grid"><div class="card">${mlab}-${lm.slice(2,4)} actual<div class="kpi">${lk(lmC)}</div><small>${lmT?`target ${lk(lmT)} · <span class="pc ${pcl(lmC/lmT*100)}">${Math.round(lmC/lmT*100)}%</span>`:'no kg target'}</small></div>
+ <div class="card">YTD Apr–${mlab}<div class="kpi">${lk(tc)}</div><small>${ytdT?`target ${lk(ytdT)} · <span class="pc ${pcl(tc/ytdT*100)}">${Math.round(tc/ytdT*100)}%</span>`:'no kg target'}</small></div>
+ <div class="card">vs last year (same months)<div class="kpi ${pc(g)}">${fp(g)}</div><small>${lk(tl)} in FY ${d.ly} · ${mlab}: ${lk(lmL)}</small></div>
+ <div class="card">${team?'Team':'My'} activity<div class="kpi">${myV} visits</div><small>this calendar month · ${myE} open enquiries</small></div>
+ ${team?P.slice(0,6).map(r=>`<div class="card">${esc(xlabel(r.k))}<div class="kpi ${pc(r.g)}">${fp(r.g)}</div><small>${lk(r.c)} vs ${lk(r.l)}</small></div>`).join(''):''}</div>
+ <div class="grid"><div><div style="position:relative;height:260px"><canvas id="cdMon" aria-label="Monthly kg LY vs CY"></canvas></div></div>${team?`<div><div style="position:relative;height:260px"><canvas id="cdExec" aria-label="Kg by marketing person LY vs CY"></canvas></div></div>`:''}</div>
+ ${TC.length?`<div class="tw"><h3>My top customers — Apr to ${mlab}</h3><table><tr><th>#</th><th>Customer</th><th>${d.cy}</th><th>${d.ly} same months</th><th>Change</th></tr>${TC.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(clabel(r.k,d.R))}</td><td>${kg(r.c)}</td><td>${kg(r.l)}</td><td class="${pc(r.g)}">${r.l?fp(r.g):'<span class="tag ok">new</span>'}</td></tr>`).join('')}</table></div>`:''}
+ <small>From the customerwise sales file. Details: <a href="#" data-go="sana:">Sales analysis</a>.</small></div>${cwsKgTargetCard(team)}`}
+// roles without sales access (planning, dispatch, factory): company kg totals only, from the team_kg_monthly() summary
+function opsKgCard(){const T=D.team_kg||[];const A=T.filter(r=>+r.kg>0);if(!A.length)return'';const lm=A.map(r=>r.month).sort().pop(),fy=(A.find(r=>r.month===lm)||{}).fy,MS=CWS.fyMonths(fy),n=MS.indexOf(lm)+1,mlab=CWS.MLAB[n-1];
+ const get=m=>T.find(r=>r.month===m)||{},ly=CWS.fyMonths(prevFy(fy)),ytd=MS.slice(0,n).reduce((s,m)=>s+(+get(m).kg||0),0),ytdT=MS.slice(0,n).reduce((s,m)=>s+(+get(m).target_kg||0),0),lyY=ly.slice(0,n).reduce((s,m)=>s+(+get(m).kg||0),0),c=p=>p==null?'—':`<span class="pc ${pcl(p)}">${Math.round(p)}%</span>`;
+ return `<div class="card tw"><h2>Company volume (kg) · FY ${fy}</h2><p><span class="tag ok">Latest month: ${mlab}-${lm.slice(2,4)}</span> <small>YTD = Apr to ${mlab}.</small></p>
+ <div class="grid"><div class="card">${mlab} actual kg<div class="kpi">${lk(get(lm).kg)}</div><small>${+get(lm).target_kg?'target '+lk(get(lm).target_kg)+' · '+c(get(lm).kg/get(lm).target_kg*100):''}</small></div><div class="card">YTD Apr–${mlab}<div class="kpi">${lk(ytd)}</div><small>${ytdT?'target '+lk(ytdT)+' · '+c(ytd/ytdT*100):''}</small></div><div class="card">vs last year<div class="kpi ${pc(gp(ytd,lyY))}">${fp(gp(ytd,lyY))}</div><small>${lk(lyY)} same months FY ${prevFy(fy)}</small></div></div>
+ <table><tr><th>Month</th>${MS.map((m,i)=>`<th>${CWS.MLAB[i]}-${m.slice(2,4)}</th>`).join('')}</tr><tr><td>Target</td>${MS.map(m=>`<td>${+get(m).target_kg?nf(get(m).target_kg):'—'}</td>`).join('')}</tr><tr><td>Actual</td>${MS.map((m,i)=>`<td>${i<n?nf(get(m).kg):'<small class="bad">pending upload</small>'}</td>`).join('')}</tr><tr><td>%</td>${MS.map((m,i)=>`<td>${i<n&&+get(m).target_kg?c(get(m).kg/get(m).target_kg*100):''}</td>`).join('')}</tr></table><small>Company totals from the customerwise sales file.</small></div>`}
 const dch={};function drawDash(){if(!window.Chart||!$('#cdMon'))return;Object.values(dch).forEach(c=>c.destroy());const s={...CA};CA.x='';CA.p='';const d=caData();Object.assign(CA,s);if(!d)return;
- dch.m=monChart($('#cdMon'),d);dch.x=cmpChart($('#cdExec'),cmpRows(d,xkey).sort((a,b)=>b.c-a.c),xlabel,d)}
+ dch.m=monChart($('#cdMon'),d);if($('#cdExec'))dch.x=cmpChart($('#cdExec'),cmpRows(d,xkey).sort((a,b)=>b.c-a.c),xlabel,d)}
 // Targets tab helper (Balaji): last year / this year kg per person next to the targets
 window.cwsTargetHelp=()=>{const s={...CA};CA.x='';CA.p='';const d=caData();Object.assign(CA,s);if(!d)return'';const mlab=CWS.MLAB[d.n-1];
  return `<div class="card tw"><h2>Reference: kg per marketing person</h2><table><tr><th>Marketing person</th><th>FY ${d.ly} full year</th><th>FY ${d.ly} monthly avg</th><th>FY ${d.cy} Apr–${mlab}</th><th>FY ${d.cy} monthly avg</th><th>Growth</th></tr>${cmpRows(d,xkey).sort((a,b)=>b.c-a.c).map(r=>`<tr><td>${esc(xlabel(r.k))}</td><td>${kg(r.lf)}</td><td>${kg(r.lf/12)}</td><td>${kg(r.c)}</td><td>${kg(r.c/d.n)}</td><td class="${pc(r.g)}">${fp(r.g)}</td></tr>`).join('')}</table></div>`};
@@ -170,7 +186,7 @@ function mwTable(rows,fy,full){const MS=CWS.fyMonths(fy),last=MS.map(m=>rows.som
 const caAll=()=>{const s={...CA};CA.x='';CA.p='';const d=caData();Object.assign(CA,s);return d};
 function mwCard(d,full){return `<div class="card tw"><h2>Month-wise kg — FY ${d.cy}${CA.x||CA.p?' (filtered)':''}</h2>${mwTable(d.C,d.cy,full)}
  ${d.hasLY?`<details><summary>FY ${d.ly} month-wise kg</summary>${mwTable(d.L,d.ly,full)}</details>`:''}<small>Uploaded years: ${d.FY.map(f=>'FY '+f).join(', ')} (customerwise sales file).</small></div>`}
-function cwsSalesCard(){if(!can(U,'cws_view'))return'';const d=caAll();if(!d)return'';const full=can(U,'full')||can(U,'sales_view')||can(U,'io_sales');
+function cwsSalesCard(){if(!can(U,'cws_view'))return'';const d=caAll();if(!d)return'';const full=cwsAll();
  return `<div class="card"><h2>Customerwise sales (kg) — FY ${d.cy}</h2><div class="grid"><div><label>Financial year</label><select id="cwsfy">${d.FY.map(f=>`<option ${f===d.cy?'selected':''}>${f}</option>`).join('')}</select></div>
  <div class="card">FY ${d.cy} total<div class="kpi">${lk(sum(d.C,'qty'))}</div><small>${d.n} month${d.n>1?'s':''} · ${new Set(d.C.map(ckey)).size} customers</small></div></div>
  <div class="tw">${mwTable(d.C,d.cy,full)}</div><small>From the customerwise sales file. Charts and last-year comparison: <a href="#" data-go="sana:">Sales analysis</a>. The ERP / Tally ₹ value uploads are below.</small></div>`}
@@ -179,7 +195,7 @@ let CK=null;window.cwsCust=()=>{if(!can(U,'cws_view'))return null;const d=caAll(
  return{head:`<th>Kg FY ${CK.cy}</th><th>Kg FY ${CK.ly}</th>`,sort:a=>a.slice().sort((x,y)=>{const X=CK.m[x.id]||{c:0,l:0},Y=CK.m[y.id]||{c:0,l:0};return (Y.c-X.c)||(Y.l-X.l)}),cell:id=>{const x=CK.m[id];return `<td>${x&&x.c?nf(x.c):'—'}</td><td>${x&&x.l?nf(x.l):'—'}</td>`}}};
 // ---------- kg targets (targets.qty, per month) vs customerwise actual kg: Sales analysis, Dashboard, Targets screens
 const pcl=p=>p==null?'':p>=100?'pg':p>=90?'pa':'pr';
-window.cwsKgTargetCard=compact=>{if(!can(U,'cws_view'))return'';const d=caAll();if(!d)return'';const fy=d.cy,MS=CWS.fyMonths(fy),TG=D.targets||[],full=can(U,'full')||can(U,'sales_view')||can(U,'io_sales');
+window.cwsKgTargetCard=compact=>{if(!can(U,'cws_view'))return'';const d=caAll();if(!d)return'';const fy=d.cy,MS=CWS.fyMonths(fy),TG=D.targets||[],full=cwsAll();
  const tq=(x,m)=>{const t=TG.find(t=>t.exec_id===x&&t.period===m);return t&&t.qty!=null&&t.qty!==''?+t.qty:null};
  const E=(full?mkt().map(p=>p.id):[ME()]).filter(x=>MS.some(m=>tq(x,m)!=null));if(!E.length)return compact?'':`<div class="card"><h2>Kg target vs actual — FY ${fy}</h2><p><small>No monthly kg targets set for FY ${fy}. Add them on the Targets screen (Qty (kg), period YYYY-MM).</small></p></div>`;
  const n=d.n,mlab=CWS.MLAB[n-1],act=(x,m)=>sum(d.C.filter(r=>r.exec_id===x&&r.month===m),'qty'),pct=(a,t)=>t?a/t*100:null,cell=p=>p==null?'—':`<span class="pc ${pcl(p)}">${Math.round(p)}%</span>`;
@@ -188,7 +204,7 @@ window.cwsKgTargetCard=compact=>{if(!can(U,'cws_view'))return'';const d=caAll();
  const rows=[...R,...(R.length>1?[tot]:[])],nm=r=>r.x?esc(pname(r.x)):'<b>Team total</b>';
  const ytd=`<table><tr><th>Marketing person</th><th>Target Apr–${mlab}</th><th>Actual Apr–${mlab}</th><th>Achieved</th><th>FY ${fy} target</th></tr>${rows.map(r=>`<tr><td>${nm(r)}</td><td>${nf(r.yt)}</td><td>${nf(r.ya)}</td><td>${cell(pct(r.ya,r.yt))}</td><td>${nf(r.ft)}</td></tr>`).join('')}</table>`;
  if(compact)return `<div class="card tw"><h2>Kg target vs actual — FY ${fy}, Apr to ${mlab}</h2>${ytd}<small>Targets in kg from the Targets screen; actual = customerwise sales. Month-wise: <a href="#" data-go="sana:">Sales analysis</a>.</small></div>`;
- const mon=`<table class="tva"><tr><th>Marketing person</th>${MS.map((m,i)=>`<th>${CWS.MLAB[i]}-${m.slice(2,4)}</th>`).join('')}</tr>${rows.map(r=>`<tr><td>${nm(r)}</td>${MS.map((m,i)=>`<td><small>T ${nf(r.t[i])}</small><br>${r.a[i]==null?'<small>no data yet</small>':`<small>A ${nf(r.a[i])}</small><br>${cell(pct(r.a[i],r.t[i]))}`}</td>`).join('')}</tr>`).join('')}</table>`;
+ const mon=`<table class="tva"><tr><th>Marketing person</th>${MS.map((m,i)=>`<th>${CWS.MLAB[i]}-${m.slice(2,4)}</th>`).join('')}</tr>${rows.map(r=>`<tr><td>${nm(r)}</td>${MS.map((m,i)=>`<td><small>T ${nf(r.t[i])}</small><br>${r.a[i]==null?'<small class="bad">pending upload</small>':`<small>A ${nf(r.a[i])}</small><br>${cell(pct(r.a[i],r.t[i]))}`}</td>`).join('')}</tr>`).join('')}</table>`;
  return `<div class="card tw"><h2>Kg target vs actual — FY ${fy}</h2>${ytd}<h3>Month by month (T = target kg, A = actual kg)</h3>${mon}<small><span class="pc pg">≥100%</span> <span class="pc pa">90–99%</span> <span class="pc pr">&lt;90%</span> · Targets in kg from the Targets screen; actual = customerwise sales file.</small></div>`};
 // ---------- wiring: Import/Export (HR Admin), "Sales uploads" tab (upload permission without Import/Export), Sales analysis, dashboard
 {const ov=window.VIEWS.io,ob=window.bind_io;window.VIEWS={...window.VIEWS,io:()=>cwsCard()+ov()};window.bind_io=()=>{ob&&ob();bind_cws()}}

@@ -46,3 +46,10 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
 - **Sales (ERP)** tab – a *Customerwise sales (kg)* card with an FY selector at the top (the ERP/Tally ₹ uploads stay below it).
 - **Customers** – *Kg FY current / last* columns, customers sorted by current-year kg.
 - The Tally register (₹ value) section notes which FYs have a register upload (currently FY 2024-25 only).
+
+## Dashboards for every login (v1.6.0)
+- Marketing: *My volume* — latest month and YTD kg vs own kg target, LY vs CY chart, top customers, visits / open enquiries, month-by-month target vs actual.
+- HR Admin, MD, Accounts, info@ (sales uploads) and Balaji (targets): *Team volume* with a per-person table.
+- Planning, Dispatch, Factory: *Company volume* (monthly totals and targets only, via `team_kg_monthly()`).
+- "Latest month" = last month uploaded in the customerwise file (not the calendar month). YTD and targets run to that month; later months show *pending upload*.
+- Data refreshes live (Supabase realtime on uploads, targets, orders, enquiries, visits, tasks, messages; 60 s poll if realtime is down; refresh when the app returns to the foreground). Header shows *Updated hh:mm* and a ⟳ button.

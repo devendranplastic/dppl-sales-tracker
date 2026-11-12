@@ -630,5 +630,23 @@ insert into incentive_rules(name,min_qty,min_value,margin_from,margin_to,pct)
  where not exists (select 1 from incentive_rules);
 insert into settings(margin_min_pct) select 12 where not exists (select 1 from settings);
 
+-- ---------- v1.6.0: dashboards for every login + live refresh
+-- Accounts and sales-upload users (info@) see all kg targets for the team dashboard
+drop policy if exists r_tgt_sales on targets; create policy r_tgt_sales on targets for select using (has_role('accounts') or has_cap('sales_import') or has_cap('targets'));
+-- Company kg per month (no customer detail) for roles without sales access (planning, dispatch, factory): actual + target totals
+create or replace function team_kg_monthly() returns table(fy text, month text, kg numeric, target_kg numeric)
+ language sql stable security definer set search_path = public as $$
+ with a as (select fy, month, sum(qty) kg from customerwise_sales group by fy, month),
+      t as (select period as month, sum(qty) as target_kg from targets where period ~ '^\d{4}-\d{2}$' and qty is not null group by period)
+ select coalesce(a.fy, case when substr(t.month,6,2)::int>=4 then substr(t.month,1,4)||'-'||lpad(((substr(t.month,1,4)::int+1)%100)::text,2,'0') else (substr(t.month,1,4)::int-1)::text||'-'||substr(t.month,3,2) end) as fy,
+        coalesce(a.month, t.month) as month, coalesce(a.kg,0) as kg, t.target_kg
+ from a full join t on t.month = a.month where auth.uid() is not null order by 2 $$;
+revoke all on function team_kg_monthly() from public, anon; grant execute on function team_kg_monthly() to authenticated;
+-- Realtime: the app re-loads when these change (RLS still applies to every subscriber)
+do $$ declare t text; begin
+ foreach t in array array['customerwise_uploads','targets','orders','enquiries','visits','tasks','messages','message_recipients','dispatch_plans','sales_uploads'] loop
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then execute format('alter publication supabase_realtime add table public.%I', t); end if;
+ end loop; end $$;
+
 -- ---------- make the first HR Admin (run separately, replace the placeholder; never commit a real email)
 -- update profiles set role='hr_admin' where email = 'HR_ADMIN_EMAIL_PLACEHOLDER';

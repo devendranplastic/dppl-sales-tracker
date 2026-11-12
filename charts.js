@@ -8,7 +8,8 @@ function achieved(x,m){if(hasSL(m))return (D.sales_lines||[]).filter(l=>l.month=
 const commonAch=m=>(D.sales_lines||[]).filter(l=>l.month===m&&(l.is_common||!l.exec_id)).reduce((a,l)=>a+(+l.value||0),0);
 const targetOf=(x,m)=>{const t=(D.targets||[]).find(t=>t.exec_id===x&&t.period===m);if(t&&t.sales_value)return +t.sales_value;const q=(D.targets||[]).find(t=>t.exec_id===x&&t.period===qOf(m));return q&&q.sales_value?+q.sales_value/3:0};
 const chartExecs=()=>can(U,'full')?(D.profiles||[]).filter(p=>p.role==='marketing'&&p.active!==false).map(p=>p.id):[ME()];
-window.chartsHtml=()=>{if(!(can(U,'full')||U.role==='marketing'))return'';const M=[...new Set([...monthsBack(12),...(D.sales_uploads||[]).map(u=>u.month)])].sort().reverse();if(!chMonth)chMonth=(window.lastUpload&&lastUpload()?.month)||M[0];
+window.chartsHtml=()=>{if(!(can(U,'full')||U.role==='marketing'))return'';if(!(D.sales_lines||[]).length&&!(D.targets||[]).some(t=>+t.sales_value)&&!(D.orders||[]).some(o=>o.released)&&!(D.enquiries||[]).some(e=>e.stage==='Won'))return''; // ₹ view only once there is ₹ data (ERP upload, ₹ targets, orders or won enquiries)
+const M=[...new Set([...monthsBack(12),...(D.sales_uploads||[]).map(u=>u.month)])].sort().reverse();if(!chMonth)chMonth=(window.lastUpload&&lastUpload()?.month)||[...new Set((D.sales_lines||[]).map(l=>l.month))].sort().pop()||M[0];
  const E=chartExecs(),rows=E.map(x=>({x,t:targetOf(x,chMonth),a:achieved(x,chMonth)}));const tt=rows.reduce((s,r)=>s+r.t,0),ta=rows.reduce((s,r)=>s+r.a,0)+(can(U,'full')?commonAch(chMonth):0);
  return `<div class="card"><div class="grid"><div><h2 style="margin:0">Sales vs target ${can(U,'full')?'— marketing team':'— my performance'}</h2><small>${hasSL(chMonth)?'Actual ERP sales':'No ERP upload for this month — based on released orders / won enquiries'}</small></div>
  <div><label>Month</label><select id="chm">${M.map(m=>`<option ${m===chMonth?'selected':''}>${m}</option>`).join('')}</select></div></div>
