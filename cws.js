@@ -4,7 +4,10 @@
 const nk=s=>String(s??'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
 const MONTHS=[['apr',4],['may',5],['jun',6],['jul',7],['aug',8],['sep',9],['oct',10],['nov',11],['dec',12],['jan',1],['feb',2],['mar',3]];
 const MLAB=['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'];
-const monIdx=h=>{const k=nk(h).replace(/\d+$/,'');if(!k||k.length<3)return -1;return MONTHS.findIndex(([m])=>k===m||(k.startsWith(m)&&['june','july','sept','april','march','august','october','november','december','january','february'].includes(k)))};
+// month headers may also be real dates (Excel date cells "Apr-25"): Date objects, Excel serial numbers or ISO / dd-mm-yyyy text
+const hdrDate=h=>{if(h instanceof Date&&!isNaN(h))return{y:h.getFullYear(),m:h.getMonth()+1};if(typeof h==='number'&&h>=36526&&h<73051&&Math.abs(h-Math.round(h))<1e-6){const d=new Date(Math.round((h-25569)*864e5));return{y:d.getUTCFullYear(),m:d.getUTCMonth()+1}}
+ const t=String(h??'').trim();let m=t.match(/^(20\d{2})[-\/.](\d{1,2})[-\/.]\d{1,2}(?:[ T].*)?$/);if(m)return{y:+m[1],m:+m[2]};m=t.match(/^\d{1,2}[-\/.](\d{1,2})[-\/.](20\d{2})$/);if(m)return{y:+m[2],m:+m[1]};return null};
+const monIdx=h=>{const d=hdrDate(h);if(d){if(d.m<1||d.m>12)return -1;return MONTHS.findIndex(([,mm])=>mm===d.m)}const k=nk(h).replace(/\d+$/,'');if(!k||k.length<3)return -1;return MONTHS.findIndex(([m])=>k===m||(k.startsWith(m)&&['june','july','sept','april','march','august','october','november','december','january','february'].includes(k)))};
 const COLS={sno:['sno','slno','serialno','no','sno.'],exec:['name','marketingperson','marketing','executive','salesperson','marketingexecutive','exec'],product:['product','productcategory','variant','varient','item'],customer:['customername','customer','party','partyname','client','clientname','particulars'],total:['total','fytotal','yeartotal'],avg:['average','avg','monthlyaverage']};
 // "25-26" | "2025-26" | "FY 2025-2026" -> "2025-26"
 function fyFrom(s){const t=String(s||'');let m=t.match(/(20\d{2})\s*[-\/–]\s*(20)?(\d{2})(?!\d)/);if(m){const y=+m[1],e=+m[3];if((y+1)%100===e)return `${y}-${String(e).padStart(2,'0')}`}
@@ -12,12 +15,13 @@ function fyFrom(s){const t=String(s||'');let m=t.match(/(20\d{2})\s*[-\/–]\s*(
 const fyMonths=fy=>{const y=+fy.slice(0,4);return MONTHS.map(([,mm])=>`${mm>=4?y:y+1}-${String(mm).padStart(2,'0')}`)};
 function num(v){if(v==null)return null;if(typeof v==='number')return isFinite(v)?v:null;const s=String(v).replace(/[,\s₹]/g,'');if(s===''||/^[-–—]+$/.test(s)||/^n\/?a$/i.test(s))return null;const n=parseFloat(s.replace(/[()]/g,''));return isNaN(n)?NaN:(/^\(.*\)$/.test(s)?-n:n)}
 function findHeader(aoa){for(let i=0;i<Math.min(aoa.length,15);i++){const row=aoa[i]||[],map={},mon={};row.forEach((h,j)=>{const k=nk(h);if(!k)return;const mi=monIdx(h);if(mi>=0&&mon[mi]==null){mon[mi]=j;return}for(const [f,al] of Object.entries(COLS))if(map[f]==null&&al.includes(k)){map[f]=j;break}});
-  if(map.customer!=null&&Object.keys(mon).length>=1)return{row:i,map,mon,headers:row.map(h=>h==null?'':String(h))}}return null}
+  if(map.customer!=null&&Object.keys(mon).length>=1){let fy=null;for(const [mi,j] of Object.entries(mon)){const d=hdrDate(row[j]);if(d){const y=d.m>=4?d.y:d.y-1;fy=`${y}-${String((y+1)%100).padStart(2,'0')}`;break}}
+   return{row:i,map,mon,fy,headers:row.map(h=>{const d=hdrDate(h);return d?MLAB[MONTHS.findIndex(([,mm])=>mm===d.m)]+'-'+String(d.y).slice(2):h==null?'':String(h)})}}}return null}
 const r4=n=>Math.round(n*10000)/10000;
 // aoa = array of rows; opt.fy overrides; opt.sheet/opt.file give hints for the FY
 function parse(aoa,opt={}){const H=findHeader(aoa);if(!H)return{error:'Header row not found. It needs Customer Name and month columns (Apr, May, …), e.g. S.No | Name | Product | Customer Name | Apr … Mar | Total.'};
  let title='';for(let i=0;i<H.row;i++)title+=' '+(aoa[i]||[]).filter(v=>v!=null).join(' ');
- const fyAuto=fyFrom(opt.sheet)||fyFrom(title)||fyFrom(opt.file);const fy=opt.fy||fyAuto;
+ const fyAuto=fyFrom(opt.sheet)||fyFrom(title)||H.fy||fyFrom(opt.file);const fy=opt.fy||fyAuto;
  const MS=fy?fyMonths(fy):null,rows=[],skipped=[],warnings=[],errors=[],lines=[];let fileTotal=null;
  const monCols=Object.entries(H.mon).map(([i,j])=>[+i,j]).sort((a,b)=>a[0]-b[0]);
  for(let i=H.row+1;i<aoa.length;i++){const a=aoa[i]||[],src=i+1,g=f=>H.map[f]==null?null:a[H.map[f]],s=v=>v==null?'':String(v).replace(/\s+/g,' ').trim();
