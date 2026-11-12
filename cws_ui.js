@@ -10,7 +10,9 @@ const isMk=()=>U&&U.role==='marketing';
 // customer-level rows for everyone (non-marketing); marketing only ever has their own customers' rows (RLS)
 const cwsAll=()=>!isMk()&&(can(U,'full')||can(U,'sales_view')||can(U,'io_sales')||U.role==='accounts');window.cwsAll=cwsAll;
 // person-level team view: non-marketing roles only (v1.8: marketing see only themselves)
-const cwsTeam=()=>cwsAll();window.cwsTeam=cwsTeam;
+const cwsTeam=()=>!isMk();window.cwsTeam=cwsTeam;
+// kg views: sales roles (customer level) + every other non-marketing role (person level, read-only, no customer names)
+const kgView=()=>can(U,'cws_view')||!isMk();
 const prevFy=fy=>{const y=+fy.slice(0,4)-1;return `${y}-${String((y+1)%100).padStart(2,'0')}`};
 const FY_OPTS=()=>{const y=new Date().getFullYear();return [...Array(9)].map((_,i)=>{const a=y-6+i;return `${a}-${String((a+1)%100).padStart(2,'0')}`})};
 const fyOfToday=()=>{const d=new Date(),y=d.getMonth()>=3?d.getFullYear():d.getFullYear()-1;return `${y}-${String((y+1)%100).padStart(2,'0')}`};
@@ -96,7 +98,7 @@ const xlabel=k=>k.startsWith('raw:')?k.slice(4)+' (no login)':k==='(none)'?'Comm
 const ckey=r=>r.customer_id||'n:'+nk(r.customer_name);
 const clabel=(k,rows)=>k.startsWith('n:')?(rows.find(r=>ckey(r)===k)||{}).customer_name:cname(k);
 const kpRows=()=>(D.kg_person||[]).map(r=>({fy:r.fy,month:r.month,exec_id:r.exec_id,qty:+r.kg||0,customer_id:null,product:null}));
-function caData(agg){const all=cwsAll(),team=agg&&isMk()&&cwsTeam(),R=agg&&isMk()?kpRows().filter(r=>team||r.exec_id===ME()):(D.customerwise_sales||[]).filter(r=>all||r.exec_id===ME()),FY=[...new Set(R.map(r=>r.fy))].sort().reverse();if(!FY.length)return null;if(!CA.fy||!FY.includes(CA.fy))CA.fy=FY[0];
+function caData(agg){const all=cwsAll(),kp=agg&&(isMk()||!cwsAll()),team=kp&&cwsTeam(),R=kp?kpRows().filter(r=>team||r.exec_id===ME()):(D.customerwise_sales||[]).filter(r=>all||r.exec_id===ME()),FY=[...new Set(R.map(r=>r.fy))].sort().reverse();if(!FY.length)return null;if(!CA.fy||!FY.includes(CA.fy))CA.fy=FY[0];
  const cy=CA.fy,ly=prevFy(cy),ly2=prevFy(ly),MS=CWS.fyMonths(cy),ML=CWS.fyMonths(ly),M2=CWS.fyMonths(ly2);
  let A=R;if(CA.x)A=A.filter(r=>xkey(r)===CA.x);if(CA.p)A=A.filter(r=>(r.product||'(blank)')===CA.p);
  const C=A.filter(r=>r.fy===cy),L=A.filter(r=>r.fy===ly),up=(D.customerwise_uploads||[]).find(u=>u.fy===cy);
@@ -155,7 +157,7 @@ function exportCA(){const d=caData();if(!d)return;const wb=XLSX.utils.book_new()
  XLSX.writeFile(wb,`DPPL_LY_vs_CY_FY${d.cy}.xlsx`)}
 function bindCA(){const f=$('#cafy');if(f)f.onchange=()=>{CA.fy=f.value;render()};const x=$('#cax');if(x)x.onchange=()=>{CA.x=x.value;render()};const p=$('#cap');if(p)p.onchange=()=>{CA.p=p.value;render()};const e=$('#caexp');if(e)e.onclick=exportCA;drawCA()}
 // ---------- MD dashboard card (management)
-function dashCard(){if(!can(U,'cws_view'))return opsKgCard();const d=caAgg(),own=isMk()?caAll():d;if(!d)return `<div class="card"><h2>Volume (kg)</h2><p>No customerwise sales uploaded yet.</p></div>`;
+function dashCard(){if(!kgView())return opsKgCard();const d=caAgg(),own=isMk()?caAll():d;if(!d)return `<div class="card"><h2>Volume (kg)</h2><p>No customerwise sales uploaded yet.</p></div>`;
  const team=cwsTeam(),tc=sum(d.ytdC,'qty'),tl=sum(d.ytdL,'qty'),g=gp(tc,tl),mlab=CWS.MLAB[d.n-1],lm=d.MS[d.n-1],P=cmpRows(d,xkey).sort((a,b)=>b.c-a.c);
  const lmC=sum(d.C.filter(r=>r.month===lm),'qty'),lmL=sum(d.L.filter(r=>r.month===d.ML[d.n-1]),'qty'),tq=(x,m)=>{const t=(D.targets||[]).find(t=>t.exec_id===x&&t.period===m);return t&&t.qty!=null?+t.qty:0};
  const E=team?mkt().map(p=>p.id):[ME()],lmT=E.reduce((s,x)=>s+tq(x,lm),0),ytdT=E.reduce((s,x)=>s+d.MS.slice(0,d.n).reduce((a,m)=>a+tq(x,m),0),0);
@@ -201,7 +203,7 @@ let CK=null;window.cwsCust=()=>{if(!can(U,'cws_view'))return null;const d=caAll(
  return{head:`<th>Kg FY ${CK.cy}</th><th>Kg FY ${CK.ly}</th>`,sort:a=>a.slice().sort((x,y)=>{const X=CK.m[x.id]||{c:0,l:0},Y=CK.m[y.id]||{c:0,l:0};return (Y.c-X.c)||(Y.l-X.l)}),cell:id=>{const x=CK.m[id];return `<td>${x&&x.c?nf(x.c):'—'}</td><td>${x&&x.l?nf(x.l):'—'}</td>`}}};
 // ---------- kg targets (targets.qty, per month) vs customerwise actual kg: Sales analysis, Dashboard, Targets screens
 const pcl=p=>p==null?'':p>=100?'pg':p>=90?'pa':'pr';
-window.cwsKgTargetCard=compact=>{if(!can(U,'cws_view'))return'';const d=caAgg();if(!d)return'';const fy=d.cy,MS=CWS.fyMonths(fy),TG=D.targets||[],full=cwsTeam();
+window.cwsKgTargetCard=compact=>{if(!kgView())return'';const d=caAgg();if(!d)return'';const fy=d.cy,MS=CWS.fyMonths(fy),TG=D.targets||[],full=cwsTeam();
  const tq=(x,m)=>{const t=TG.find(t=>t.exec_id===x&&t.period===m);return t&&t.qty!=null&&t.qty!==''?+t.qty:null};
  const E=(full?mkt().map(p=>p.id):[ME()]).filter(x=>MS.some(m=>tq(x,m)!=null));if(!E.length)return compact?'':`<div class="card"><h2>Kg target vs actual — FY ${fy}</h2><p><small>No monthly kg targets set for FY ${fy}. Add them on the Targets screen (Qty (kg), period YYYY-MM).</small></p></div>`;
  const n=d.n,mlab=CWS.MLAB[n-1],act=(x,m)=>sum(d.C.filter(r=>r.exec_id===x&&r.month===m),'qty'),pct=(a,t)=>t?a/t*100:null,cell=p=>p==null?'—':`<span class="pc ${pcl(p)}">${Math.round(p)}%</span>`;

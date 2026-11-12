@@ -788,5 +788,16 @@ begin
 
 -- live data change (v1.8, not part of a fresh install): Balaji -> role 'ceo' with caps {targets,broadcast,sales_person}
 
+-- ---------- v1.8.1: every non-marketing role gets read-only team marketing views (discipline, per-person kg, targets)
+drop policy if exists r_vis_nonmkt on visits;
+create policy r_vis_nonmkt on visits for select to authenticated using (signed_in() and not is_mkt());
+drop policy if exists r_tgt_nonmkt on targets;
+create policy r_tgt_nonmkt on targets for select to authenticated using (signed_in() and not is_mkt());
+create or replace function kg_by_person() returns table(fy text, month text, exec_id uuid, kg numeric) language sql stable security definer set search_path=public as $$
+ select s.fy, s.month, s.exec_id, sum(s.qty) from customerwise_sales s
+ where auth.uid() is not null and signed_in() and (s.exec_id = auth.uid() or not is_mkt())
+ group by 1,2,3 order by 2 $$;
+grant execute on function kg_by_person() to authenticated;
+
 -- ---------- make the first HR Admin (run separately, replace the placeholder; never commit a real email)
 -- update profiles set role='hr_admin' where email = 'HR_ADMIN_EMAIL_PLACEHOLDER';

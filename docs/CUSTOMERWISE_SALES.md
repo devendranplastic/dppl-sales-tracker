@@ -71,3 +71,12 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
 - **App changes for marketing:** the Marketing discipline card and the Executive / Marketing person filters are removed. The dashboard is "My volume" and the follow-up table is "My follow-up discipline". The enquiry owner is locked to the user.
 - **Balaji is now `ceo`, with the full team view everywhere, the same as MD.** His caps are `targets`, `broadcast` and `sales_person`. **sales_person** keeps him counted as a marketing person: he owns customers, gets kg targets, is matched by name in the customerwise / register imports, and appears in owner and target pickers.
 - **Unchanged:** all other roles keep their existing views.
+
+## v1.8.1: team marketing views for every non-marketing role
+
+- Accounts, planning, despatch, factory manager and costing now get the read-only team marketing views, joining HR, MD, CEO and info@:
+  - the Marketing discipline card;
+  - the Team volume card with per-person kg (no customer names);
+  - the kg target vs actual tables.
+- The database grants these roles **read** access to visits, targets and `kg_by_person()`. Write access is unchanged.
+- The marketing-team restrictions from v1.8.0 are unchanged.
