@@ -13,6 +13,11 @@ from (values
   ('accounts@devendranplastic.com','accounts','Ramesh')
 ) as v(email,role,name)
 where lower(p.email)=v.email;
+-- Extra permissions (capability flags; HR Admin can change them in Setup → Users):
+--  info@   : upload the sales register + customerwise sales file (no other HR Admin powers)
+--  balaji@ : manage every marketing person's targets + message everyone (stays a marketing person otherwise)
+update profiles set caps='{sales_import}' where lower(email)='info@devendranplastic.com';
+update profiles set caps='{targets,broadcast}' where lower(email)='balaji@devendranplastic.com';
 -- Marketing reports to MD
 update profiles set reporting_manager=(select id from profiles where lower(email)='md@devendranplastic.com')
  where lower(email) in ('balaji@devendranplastic.com','nathan@devendranplastic.com','jesaon@devendranplastic.com','suresh@devendranplastic.com');

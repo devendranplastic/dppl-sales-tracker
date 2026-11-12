@@ -22,7 +22,7 @@ function preview(){const p=RG.p,I=custIdx(),live=p.rows.filter(r=>!r.cancelled),
  const ex={};live.filter(r=>r.exec).forEach(r=>{const m=execMatch(r.exec);ex[r.exec]=m});const unm=Object.keys(ex).filter(k=>ex[k].unmatched);
  live.forEach(r=>{if(r.exec&&!ex[r.exec].unmatched)return;const c=findCust(I,r);if(c&&c.exec_id)owned++});
  return{cNew,cOld,vNew,unm,fileExec:live.filter(r=>r.exec&&!ex[r.exec].unmatched).length,owned,unassigned:live.length-live.filter(r=>r.exec&&!ex[r.exec].unmatched).length-owned}}
-function regCard(){if(!can(U,'hist'))return'';const p=RG.p;let h=`<div class="card"><h2>Sales register (all-in-one) <span class="tag ok">Easiest monthly upload</span></h2>
+function regCard(){if(!can(U,'io_sales'))return'';const p=RG.p;let h=`<div class="card"><h2>Sales register (all-in-one) <span class="tag ok">Easiest monthly upload</span></h2>
  <p><small>Upload the <b>Tally sales register exactly as exported</b> — Date, Particulars, Inv No, GSTIN/UIN, Varient, Quantity, Rate, Value, Gross Total, CGST, SGST, IGST, Freight, TCS, Rounded Off. Optional extra columns: <b>Marketing Person</b> (email or name), <b>Sales Order No</b>, <b>SKU Code</b>, Remarks. One file fills customers (matched by GSTIN), product variants, invoices and sales lines for all analysis. One month or a whole year per file; re-uploading a month <b>replaces</b> that month, so nothing is duplicated.</small></p>
  <div class="grid"><div><label>All-in-one template</label><button class="sec" data-tpl="reg:xlsx" type="button">Excel</button> <button class="sec" data-tpl="reg:csv" type="button">CSV</button></div>
  <div><label>Separate templates (alternative)</label>${Object.keys(SEP).map(k=>`<button class="lt" data-tpl="${k}:csv" type="button">${k}.csv</button>`).join(' ')}</div>
@@ -43,7 +43,7 @@ function regCard(){if(!can(U,'hist'))return'';const p=RG.p;let h=`<div class="ca
   ${p.warnings.length?`<details><summary>${p.warnings.length} warning(s)</summary><table>${p.warnings.slice(0,80).map(e=>`<tr><td>Row ${e.row}</td><td>${esc(e.inv_no)}</td><td>${esc(e.issue)}</td></tr>`).join('')}</table></details>`:''}
   <div>${p.errors.length+p.skipped.length+p.warnings.length?'<button class="lt" id="rgiss" type="button">Download issues (Excel)</button> ':''}<button id="rggo" type="button" ${RG.busy?'disabled':''}>${RG.busy?'Importing…':`Import ${M.length} month(s) · ${s.lines} lines`}</button> <button class="lt" id="rgclr" type="button">Cancel</button></div></div>`}
  if(RG.res)h+=`<div class="card tw"><h2>Last import result</h2><table><tr><th>Month</th><th>Lines</th><th>Invoices</th><th>Credit notes</th><th>Cancelled</th><th>New customers</th><th>New variants</th><th>Unassigned lines</th><th>Value</th></tr>${RG.res.map(r=>`<tr><td>${r.month}</td><td>${r.lines}</td><td>${r.invoices}</td><td>${r.credit_notes}</td><td>${r.cancelled}</td><td>${r.customers_new}</td><td>${r.variants_new}</td><td>${r.unassigned_lines}</td><td>${cr(r.value)}</td></tr>`).join('')}</table></div>`;
- return h+ownersCard()}
+ return h+(can(U,'hist')?ownersCard():'')}
 // ---------- customer -> marketing owner
 function custSales(){const o={};(D.sales_lines||[]).forEach(l=>{if(!l.customer_id)return;const x=o[l.customer_id]=o[l.customer_id]||{v:0,q:0,last:''};x.v+=+l.value||0;x.q+=+l.qty||0;if(l.month>x.last)x.last=l.month});return o}
 function ownersCard(){const S=custSales(),ids=Object.keys(S);if(!ids.length)return'';const C=(D.customers||[]).filter(c=>S[c.id]),un=C.filter(c=>!c.exec_id).length;
@@ -95,6 +95,7 @@ window.bind_reg=()=>{document.querySelectorAll('[data-tpl]').forEach(b=>b.onclic
   try{const n=await assign(list);RG.msg=`Owner list: ${n} customer(s) updated.${bad.length?` <span class="bad">${bad.length} not matched:</span> ${esc(bad.slice(0,10).join('; '))}`:''}`}catch(err){alert(err.message)}await load();render()}};
 // ---------- hook into the Import / Export page (HR Admin); keep the old per-table import below it
 {const ov=window.VIEWS.io,ob=window.bind_io;window.VIEWS={...window.VIEWS,io:()=>regCard()+ov()};window.bind_io=()=>{ob&&ob();bind_reg()}}
+window.regCard=regCard;
 
 // ---------- Sales analysis (FY view from sales lines)
 let SA={fy:'',cat:'all',x:''};const charts={};

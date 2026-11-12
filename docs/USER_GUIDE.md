@@ -80,6 +80,8 @@ HR Admin is the super admin. This role controls users, master data and imports.
 
 ## 3. MD (md@) and CEO
 
+**Volume card (dashboard) and Sales analysis:** *Volume FY this year vs last year — April to last uploaded month (kg)* from the customerwise file: total, growth %, each marketing person's growth, month-by-month bars (with FY 2024-25 from the Tally register as a line), by product, top customers, and new / lost / grew / dropped customers. Excel export on the Sales analysis tab.
+
 The MD sees everything, including costing, margins and incentives. The CEO role has the same access and can be given to a user in Setup › Users when needed.
 
 ![MD dashboard](img/md_dashboard.jpg)
@@ -124,6 +126,10 @@ Each marketing person sees **only their own** customers, enquiries, chart and in
 
 ---
 
+**Balaji — extra permissions:** a **Targets** tab to add, change and delete targets for every marketing person (with a kg reference table: last year, this year, growth), and the 🔔 Messages page to message everyone or selected roles like the MD (see who read it; delete own messages). He is otherwise a normal marketing user.
+
+---
+
 ## 5. info@ — data entry for Balaji
 
 info@devendranplastic.com enters Balaji's visits, enquiries and follow-ups from the reports he sends.
@@ -136,6 +142,11 @@ info@devendranplastic.com enters Balaji's visits, enquiries and follow-ups from 
 - The audit log records **info@** as the person who typed the entry, so HR Admin and the MD can always tell who keyed it.
 
 **Daily routine:** collect Balaji's visit notes (WhatsApp or call) › enter each visit › create or update enquiries and next-action dates › tell Balaji about anything due tomorrow.
+
+**Monthly sales uploads (permission “Upload sales files”):** the **Sales uploads** tab has two cards:
+- **Customerwise monthly sales (kg):** upload the *Customerwise Sales Details* sheet (current year, growing every month). Check the preview: FY, total kg (✔ matches the grand-total row), names, close customer matches and new customers. Click **Import**. The year is replaced, never duplicated.
+- **Sales register (all-in-one):** upload the Tally sales register month.
+You cannot change users, targets, settings or customer owners by hand. See `docs/CUSTOMERWISE_SALES.md`.
 
 ---
 

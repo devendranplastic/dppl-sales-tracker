@@ -1,0 +1,6 @@
+﻿Customerwise Sales Details - 2026-27,,,,,,,,,,,,,,,,,
+S.No,Name,Product,Customer Name,Apr,May,June,July,Aug,Sep,Oct,Nov,Dec,Jan,Feb,Mar,Total,Average
+1,EXAMPLE Balaji,Milk,EXAMPLE - Tirumala Milk Products,25825.8,44396.16,74899.82,30763.46,58296.3,27892.4,52423.76,47832.74,30319.9,52259.3,47362.6,37540.24,529812.48,44151.04
+2,EXAMPLE Nathan,Lami-BOPA,EXAMPLE - Sunraja Oil Industries,41973.12,39638.5,36671.82,49541.22,46119.5,60395.5,43972.42,11570.34,50096.28,75774.08,37502.34,,,
+3,EXAMPLE Jesaon,Nylon,EXAMPLE - New World Oil Industries,7020.64,4457.84,-,,,,,,,,,,,
+,,,"EXAMPLE NOTE - one row per marketing person + product + customer; quantity in kg; blank or ""-"" = no sale; Total & Average are optional (only cross-checked); delete EXAMPLE rows before upload",,,,,,,,,,,,,,

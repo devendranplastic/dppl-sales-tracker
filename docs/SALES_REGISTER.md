@@ -1,6 +1,6 @@
 # Sales register (all-in-one upload)
 
-**Where:** Import / Export → *Sales register (all-in-one)* (HR Admin). Analysis: **Sales analysis** tab (MD/HR Admin/Accounts see all; marketing sees own).
+**Where:** Import / Export → *Sales register (all-in-one)* (HR Admin), or the **Sales uploads** tab for users with the *Upload sales files* permission (info@). Analysis: **Sales analysis** tab (MD/HR Admin/Accounts see all; marketing sees own).
 
 ## What one file does
 Upload the Tally *Sales* register exactly as exported (sheet like `Sales-24-25`), one month or a whole year:

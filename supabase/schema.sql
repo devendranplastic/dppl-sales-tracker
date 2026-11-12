@@ -26,6 +26,11 @@ create or replace function is_full()  returns boolean language sql stable as $$ 
 create or replace function can_edit() returns boolean language sql stable as $$ select has_role('hr_admin','md','ceo','marketing') $$;
 create or replace function can_margin() returns boolean language sql stable as $$ select has_role('hr_admin','md','ceo','costing') $$;
 create or replace function signed_in() returns boolean language sql stable as $$ select my_role() is not null $$;
+-- capability flags on top of the role (HR Admin sets them in Setup → Users): sales_import (upload sales register + customerwise file),
+-- targets (create/edit/delete every marketing person's targets), broadcast (message everyone like MD). HR Admin implicitly has all.
+alter table profiles add column if not exists caps text[] not null default '{}';
+create or replace function has_cap(c text) returns boolean language sql stable security definer set search_path=public as
+$$ select coalesce((select role='hr_admin' or c=any(caps) from profiles where id=auth.uid() and active),false) $$;
 create or replace function my_team() returns setof uuid language sql stable security definer set search_path=public as
 $$ select auth.uid() union select id from profiles where reporting_manager=auth.uid() $$;
 
@@ -320,7 +325,9 @@ create policy r_audit on audit_log for select using (is_full());
 -- messages: only md/ceo/hr_admin broadcast (as themselves); recipients read their own; sender sees read receipts
 create or replace function is_msg_sender(m uuid) returns boolean language sql stable security definer set search_path=public as $$ select exists(select 1 from messages where id=m and sender_id=auth.uid()) $$;
 create or replace function is_msg_recipient(m uuid) returns boolean language sql stable security definer set search_path=public as $$ select exists(select 1 from message_recipients where message_id=m and user_id=auth.uid()) $$;
-create policy i_msg on messages for insert with check (is_full() and sender_id=auth.uid());
+create policy i_msg on messages for insert with check ((is_full() or has_cap('broadcast')) and sender_id=auth.uid());
+create policy u_msg on messages for update using ((is_full() or has_cap('broadcast')) and sender_id=auth.uid()) with check (sender_id=auth.uid());
+create policy d_msg on messages for delete using ((is_full() or has_cap('broadcast')) and sender_id=auth.uid());
 create policy r_msg on messages for select using (sender_id=auth.uid() or is_msg_recipient(id));
 create policy r_rcpt on message_recipients for select using (user_id=auth.uid() or is_msg_sender(message_id));
 create policy u_rcpt on message_recipients for update using (user_id=auth.uid()) with check (user_id=auth.uid());
@@ -425,7 +432,7 @@ alter table sales_lines add column if not exists gross_total numeric;
 create index if not exists sales_lines_cust on sales_lines(customer_id);
 -- only management may change who owns a customer
 create or replace function trg_cust_owner() returns trigger language plpgsql as $$
-begin if new.exec_id is distinct from old.exec_id and not is_full() then raise exception 'Only HR Admin / MD can change the customer''s marketing owner'; end if; return new; end $$;
+begin if new.exec_id is distinct from old.exec_id and not is_full() and coalesce(current_setting('dppl.owner_sync',true),'')<>'on' then raise exception 'Only HR Admin / MD can change the customer''s marketing owner'; end if; return new; end $$;
 drop trigger if exists t_cust_owner on customers; create trigger t_cust_owner before update on customers for each row execute function trg_cust_owner();
 do $$ declare t text; begin foreach t in array array['product_variants','sales_invoices'] loop
   execute format('alter table %I enable row level security',t);
@@ -438,10 +445,10 @@ create policy r_si on sales_invoices for select using (is_full() or exec_id in (
 create policy acc_si_r on sales_invoices for select using (has_role('accounts'));
 
 -- One month of the register per call (atomic). Re-uploading a month replaces it, so the same file never duplicates.
-create or replace function import_sales_register(p_month text, p_file text, p_rows jsonb) returns jsonb language plpgsql set search_path=public as $$
+create or replace function import_sales_register(p_month text, p_file text, p_rows jsonb) returns jsonb language plpgsql security definer set search_path=public as $$
 declare r record; v_cid uuid; n_new int:=0; n_match int:=0; n_var int:=0; n_sku int:=0; up uuid; n_inv int; n_lines int; v_val numeric; v_qty numeric;
 begin
-  if not is_admin() then raise exception 'Only HR Admin can import the sales register'; end if;
+  if not (is_admin() or has_cap('sales_import')) then raise exception 'Only HR Admin or a user with the sales-upload permission can import the sales register'; end if;
   if p_month is null or p_month !~ '^\d{4}-\d{2}$' then raise exception 'Bad month %', p_month; end if;
   if to_regclass('pg_temp._reg') is not null then drop table pg_temp._reg; end if;
   create temp table _reg as select x.*, null::uuid cid, null::uuid xid, null::text xsrc
@@ -516,6 +523,99 @@ begin
       where customer_id=r.customer_id and coalesce(exec_source,'') not in ('file','file-common');
     n:=n+1; end loop;
   return n; end $$;
+
+-- ---------- Customerwise monthly sales (Bala's "Customerwise Sales Details" sheet: marketing person × product × customer × month, quantity in kg)
+-- One upload per financial year; re-uploading a FY replaces it (the current-year sheet grows every month). The file is the authoritative
+-- customer -> marketing person mapping: after each upload customers.exec_id follows it and register sales are re-tagged.
+alter table customers add column if not exists name_aliases text[] not null default '{}';
+create table if not exists customerwise_uploads(id uuid primary key default gen_random_uuid(), fy text not null unique check (fy ~ '^\d{4}-\d{2}$'), file_name text, sheet text,
+  lines int, rows int, total_qty numeric, months_covered text[] not null default '{}', uploaded_by uuid default auth.uid(), created_at timestamptz default now(), updated_at timestamptz default now());
+create table if not exists customerwise_sales(id uuid primary key default gen_random_uuid(), upload_id uuid not null references customerwise_uploads on delete cascade, fy text not null, month text not null check (month ~ '^\d{4}-\d{2}$'),
+  customer_id uuid references customers, customer_name text not null, product text, exec_id uuid references profiles(id), exec_raw text, qty numeric not null, unit text not null default 'kg', src_row int,
+  created_at timestamptz default now(), updated_at timestamptz default now());
+create index if not exists cws_fy on customerwise_sales(fy); create index if not exists cws_cust on customerwise_sales(customer_id); create index if not exists cws_exec on customerwise_sales(exec_id);
+do $$ declare t text; begin foreach t in array array['customerwise_uploads','customerwise_sales'] loop
+  execute format('alter table %I enable row level security',t);
+  execute (select coalesce(string_agg(format('drop policy if exists %I on %I;',policyname,t),' '),'select 1') from pg_policies where schemaname='public' and tablename=t);
+  execute format('create policy adm_%1$s on %1$I for all using (is_admin()) with check (is_admin())',t); end loop; end $$;
+drop trigger if exists t_audit on customerwise_uploads; create trigger t_audit after insert or update or delete on customerwise_uploads for each row execute function trg_audit();
+create policy r_cwu on customerwise_uploads for select using (signed_in());
+-- quantities: management, accounts, the uploader (sales_import) and the target setter (targets) see all; marketing sees own/team
+create policy r_cws on customerwise_sales for select using (is_full() or has_role('accounts') or has_cap('sales_import') or has_cap('targets') or exec_id in (select my_team()));
+
+-- capability holders: uploader (info@) logs imports and keeps marketing-name mappings; target setter (Balaji) manages every marketing person's targets
+drop policy if exists cap_implog_r on import_logs; create policy cap_implog_r on import_logs for select using (has_cap('sales_import') and by_id=auth.uid());
+drop policy if exists cap_implog_i on import_logs; create policy cap_implog_i on import_logs for insert with check (has_cap('sales_import') and by_id=auth.uid());
+drop policy if exists cap_alias_r on exec_aliases; create policy cap_alias_r on exec_aliases for select using (has_cap('sales_import'));
+drop policy if exists cap_alias_i on exec_aliases; create policy cap_alias_i on exec_aliases for insert with check (has_cap('sales_import'));
+drop policy if exists cap_alias_u on exec_aliases; create policy cap_alias_u on exec_aliases for update using (has_cap('sales_import'));
+drop policy if exists cap_tgt on targets; create policy cap_tgt on targets for all using (has_cap('targets'))
+  with check (has_cap('targets') and exists(select 1 from profiles p where p.id=exec_id and p.role='marketing'));
+drop policy if exists cap_sl_r on sales_lines; create policy cap_sl_r on sales_lines for select using (has_cap('targets'));  -- target setter sees everyone's actual sales
+
+-- Make customers.exec_id follow the customerwise file: per customer, the marketing person with the most kg in the latest FY where the customer
+-- has a mapped person. Register sales lines/invoices are re-tagged (rows whose person came from a Marketing Person column are kept).
+create or replace function sync_customer_owners_from_cws() returns jsonb language plpgsql security definer set search_path=public as $$
+declare n_c int; n_l int; n_i int;
+begin
+  if not (is_admin() or has_cap('sales_import')) then raise exception 'Not allowed'; end if;
+  create temp table _own on commit drop as
+    select distinct on (customer_id) customer_id, exec_id from (
+      select customer_id, fy, exec_id, sum(qty) q from customerwise_sales where customer_id is not null and exec_id is not null group by 1,2,3) z
+    order by customer_id, fy desc, q desc;
+  perform set_config('dppl.owner_sync','on',true);
+  update customers c set exec_id=o.exec_id from _own o where c.id=o.customer_id and c.exec_id is distinct from o.exec_id; get diagnostics n_c=row_count;
+  perform set_config('dppl.owner_sync','',true);
+  update sales_lines l set exec_id=o.exec_id, is_common=false, exec_source='customer' from _own o
+    where l.customer_id=o.customer_id and coalesce(l.exec_source,'') not in ('file','file-common') and l.exec_id is distinct from o.exec_id; get diagnostics n_l=row_count;
+  update sales_invoices s set exec_id=o.exec_id, is_common=false, exec_source='customer' from _own o
+    where s.customer_id=o.customer_id and coalesce(s.exec_source,'') not in ('file','file-common') and s.exec_id is distinct from o.exec_id; get diagnostics n_i=row_count;
+  drop table _own;
+  return jsonb_build_object('customers_reassigned',n_c,'sales_lines_retagged',n_l,'sales_invoices_retagged',n_i);
+end $$;
+
+-- One financial year per call (atomic). p_rows: [{src_row, exec, exec_id?, product, customer, customer_id?, month 'YYYY-MM', qty}]
+-- customer_id / exec_id are the app's suggested matches (fuzzy names); the database verifies them and otherwise matches by name / saved alias or creates the customer.
+create or replace function import_customerwise(p_fy text, p_file text, p_sheet text, p_rows jsonb, p_sync_owners boolean default true) returns jsonb language plpgsql security definer set search_path=public as $$
+declare r record; v_cid uuid; n_new int:=0; up uuid; v_qty numeric; n_rows int; v_sync jsonb:='{}'; v_from text; v_to text;
+begin
+  if not (is_admin() or has_cap('sales_import')) then raise exception 'Only HR Admin or a user with the sales-upload permission can import customerwise sales'; end if;
+  if p_fy is null or p_fy !~ '^\d{4}-\d{2}$' or (substr(p_fy,1,4)::int+1)%100<>substr(p_fy,6,2)::int then raise exception 'Bad financial year % (use 2025-26)', p_fy; end if;
+  v_from:=substr(p_fy,1,4)||'-04'; v_to:=(substr(p_fy,1,4)::int+1)||'-03';
+  if to_regclass('pg_temp._cw') is not null then drop table pg_temp._cw; end if;
+  create temp table _cw as select x.*, null::uuid cid, null::uuid xid from jsonb_to_recordset(p_rows) as x(src_row int, exec text, exec_id uuid, product text, customer text, customer_id uuid, month text, qty numeric);
+  update _cw set customer=nullif(regexp_replace(trim(customer),'\s+',' ','g'),''), exec=nullif(trim(exec),''), product=nullif(trim(product),'');
+  if exists(select 1 from _cw where customer is null or qty is null or month is null) then raise exception 'Every row needs Customer Name, month and quantity'; end if;
+  if exists(select 1 from _cw where month !~ '^\d{4}-\d{2}$' or month<v_from or month>v_to) then raise exception 'Rows outside FY % (Apr % – Mar %)', p_fy, v_from, v_to; end if;
+  -- customers: app suggestion (if it exists) -> exact name / saved alias -> create
+  update _cw g set cid=g.customer_id where g.customer_id is not null and exists(select 1 from customers c where c.id=g.customer_id);
+  update _cw g set cid=(select id from customers c where norm_key(c.name)=norm_key(g.customer) or norm_key(g.customer)=any(select norm_key(a) from unnest(c.name_aliases) a) order by created_at limit 1) where g.cid is null;
+  for r in select distinct on (norm_key(customer)) customer from _cw where cid is null order by norm_key(customer), src_row loop
+    insert into customers(name,mobile,source,created_by) values(r.customer,'','customerwise sales',auth.uid()) returning id into v_cid; n_new:=n_new+1;
+    update _cw set cid=v_cid where cid is null and norm_key(customer)=norm_key(r.customer); end loop;
+  -- remember the file's spelling so next month's upload matches exactly
+  update customers c set name_aliases=c.name_aliases||a.names from (select cid, array_agg(distinct customer) names from _cw g group by cid) a
+    where c.id=a.cid and not (a.names <@ (c.name_aliases||c.name));
+  -- marketing person: app suggestion (must be a marketing profile) -> saved alias -> name / email / emp code; unknown names stay as text (exec_raw)
+  update _cw g set xid=g.exec_id from profiles p where g.exec_id is not null and p.id=g.exec_id and p.role='marketing';
+  update _cw g set xid=a.exec_id from exec_aliases a where g.xid is null and g.exec is not null and a.alias=norm_key(g.exec) and not a.is_common;
+  update _cw g set xid=p.id from profiles p where g.xid is null and g.exec is not null and p.role='marketing'
+    and norm_key(g.exec) in (norm_key(p.full_name),norm_key(split_part(p.email,'@',1)),norm_key(p.email),nullif(norm_key(p.emp_code),''));
+  insert into exec_aliases(alias,raw_name,exec_id) select distinct on (norm_key(exec)) norm_key(exec), exec, xid from _cw where xid is not null and exec is not null and norm_key(exec)<>''
+    order by norm_key(exec) on conflict (alias) do update set exec_id=excluded.exec_id, raw_name=excluded.raw_name, is_common=false;
+  delete from customerwise_uploads where fy=p_fy;
+  select coalesce(sum(qty),0), count(*) into v_qty, n_rows from _cw;
+  insert into customerwise_uploads(fy,file_name,sheet,lines,rows,total_qty,months_covered)
+    values(p_fy,p_file,p_sheet,(select count(distinct src_row) from _cw),n_rows,v_qty,(select coalesce(array_agg(distinct month order by month),'{}') from _cw)) returning id into up;
+  insert into customerwise_sales(upload_id,fy,month,customer_id,customer_name,product,exec_id,exec_raw,qty,src_row)
+    select up,p_fy,month,cid,customer,product,xid,exec,qty,src_row from _cw;
+  if p_sync_owners then v_sync:=sync_customer_owners_from_cws(); end if;
+  return jsonb_build_object('fy',p_fy,'rows',n_rows,'lines',(select lines from customerwise_uploads where id=up),'qty',v_qty,'customers',(select count(distinct cid) from _cw),'customers_new',n_new,
+    'unmatched_execs',(select coalesce(jsonb_agg(distinct exec),'[]') from _cw where xid is null and exec is not null),
+    'by_exec',(select jsonb_object_agg(k,q) from (select coalesce(p.full_name,g.exec,'(blank)') k, sum(g.qty) q from _cw g left join profiles p on p.id=g.xid group by 1) z))||v_sync;
+end $$;
+revoke execute on function sync_customer_owners_from_cws() from anon;
+revoke execute on function import_customerwise(text,text,text,jsonb,boolean) from anon;
 
 -- ---------- grants (Supabase already grants these by default; explicit for clarity)
 grant usage on schema public to anon, authenticated;
