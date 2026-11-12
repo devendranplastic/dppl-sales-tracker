@@ -53,3 +53,14 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
 - Planning, Dispatch, Factory: *Company volume* (monthly totals and targets only, via `team_kg_monthly()`).
 - "Latest month" = last month uploaded in the customerwise file (not the calendar month). YTD and targets run to that month; later months show *pending upload*.
 - Data refreshes live (Supabase realtime on uploads, targets, orders, enquiries, visits, tasks, messages; 60 s poll if realtime is down; refresh when the app returns to the foreground). Header shows *Updated hh:mm* and a ⟳ button.
+
+## v1.7.0: marketing sees only their own customers
+
+- **Database (RLS).** A marketing login (Nathan, Jesaon, Suresh, Sanjeev, Balaji) can read only the customers where `customers.exec_id` is their own id. The same rule covers all customer-level data: customerwise sales, orders and their stages and dispatches, invoices and their collections and follow-ups, sales invoices and lines, SKUs, samples, artwork, complaints, customer history and dispatch plans.
+- **Unowned customers** (`exec_id` empty) are hidden from every marketing login. Non-marketing roles still see them.
+- **Adding and editing customers.** Only HR Admin and logins with the **customers** capability can add or edit customers or change the marketing owner. info@ has this capability. Accounts can still change credit limit and credit hold only. MD and CEO can view but can't edit.
+- **Person-level kg.** `kg_by_person()` returns kg per month per marketing person, with no customer names. It feeds the dashboard KPIs, the kg target vs actual tables and the Targets reference. A person's total stays complete even when one of their invoice lines is on a customer owned by someone else. Balaji (targets capability), MD, HR, accounts and info@ get every person's figures. Other marketing users get only their own.
+- **Screens.** The Customers screen for marketing shows "Showing only your customers. To add a customer or correct details, contact info@devendranplastic.com." It has no add or edit form. HR Admin and info@ get an Edit button on each customer, which also sets the marketing owner.
+- **Visits.** The customer box suggests only your own customers. You can still type a new prospect and choose **New**.
+- **New-customer rule.** The rule (≥1 new customer in 3 months) now counts customers **owned by** the person as well as those created by them, because info@ now adds the customers.
+- **Enquiries** are unchanged and visible team-wide.

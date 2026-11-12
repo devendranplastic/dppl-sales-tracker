@@ -432,7 +432,7 @@ alter table sales_lines add column if not exists gross_total numeric;
 create index if not exists sales_lines_cust on sales_lines(customer_id);
 -- only management may change who owns a customer
 create or replace function trg_cust_owner() returns trigger language plpgsql as $$
-begin if new.exec_id is distinct from old.exec_id and not is_full() and coalesce(current_setting('dppl.owner_sync',true),'')<>'on' then raise exception 'Only HR Admin / MD can change the customer''s marketing owner'; end if; return new; end $$;
+begin if new.exec_id is distinct from old.exec_id and not (is_full() or has_cap('customers')) and coalesce(current_setting('dppl.owner_sync',true),'')<>'on' then raise exception 'Only HR Admin / info@ can change the customer''s marketing owner'; end if; return new; end $$;
 drop trigger if exists t_cust_owner on customers; create trigger t_cust_owner before update on customers for each row execute function trg_cust_owner();
 do $$ declare t text; begin foreach t in array array['product_variants','sales_invoices'] loop
   execute format('alter table %I enable row level security',t);
@@ -647,6 +647,36 @@ do $$ declare t text; begin
  foreach t in array array['customerwise_uploads','targets','orders','enquiries','visits','tasks','messages','message_recipients','dispatch_plans','sales_uploads'] loop
   if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then execute format('alter publication supabase_realtime add table public.%I', t); end if;
  end loop; end $$;
+
+-- ---------- v1.7.0: marketing persons see only their own customers (Bala t43u); only HR Admin / info@ add or edit customers
+create or replace function is_mkt() returns boolean language sql stable security definer set search_path = public as $$ select coalesce((select role='marketing' from profiles where id=auth.uid() and active),false) $$;
+create or replace function cust_mine(c uuid) returns boolean language sql stable security definer set search_path = public as $$ select exists(select 1 from customers where id=c and exec_id=auth.uid()) $$;
+create or replace function can_cust_write() returns boolean language sql stable security definer set search_path = public as $$ select is_admin() or has_cap('customers') or has_cap('sales_import') $$;
+-- restrictive policies are AND-ed with the existing permissive ones, so other roles keep their current access
+drop policy if exists mk_own_customers on customers; create policy mk_own_customers on customers as restrictive for select using (not is_mkt() or exec_id = auth.uid());
+drop policy if exists cw_cust_i on customers; create policy cw_cust_i on customers as restrictive for insert with check (can_cust_write());
+drop policy if exists cw_cust_u on customers; create policy cw_cust_u on customers as restrictive for update using (can_cust_write() or has_role('accounts'));
+do $$ declare t text; begin
+ foreach t in array array['customerwise_sales','orders','invoices','sales_invoices','sales_lines','complaints','customer_history','dispatch_plans','skus'] loop
+  execute format('drop policy if exists mk_own_%1$s on %1$I', t);
+  execute format('create policy mk_own_%1$s on %1$I as restrictive for select using (not is_mkt() or customer_id is null or cust_mine(customer_id))', t);
+ end loop; end $$;
+drop policy if exists mk_own_samples on samples; create policy mk_own_samples on samples as restrictive for select using (not is_mkt() or sku_id is null or exists(select 1 from skus s where s.id=samples.sku_id and (s.customer_id is null or cust_mine(s.customer_id))));
+drop policy if exists mk_own_artworks on artworks; create policy mk_own_artworks on artworks as restrictive for select using (not is_mkt() or sku_id is null or exists(select 1 from skus s where s.id=artworks.sku_id and (s.customer_id is null or cust_mine(s.customer_id))));
+drop policy if exists mk_own_order_stages on order_stages; create policy mk_own_order_stages on order_stages as restrictive for select using (not is_mkt() or exists(select 1 from orders o where o.id=order_stages.order_id and (o.customer_id is null or cust_mine(o.customer_id))));
+drop policy if exists mk_own_dispatches on dispatches; create policy mk_own_dispatches on dispatches as restrictive for select using (not is_mkt() or exists(select 1 from orders o where o.id=dispatches.order_id and (o.customer_id is null or cust_mine(o.customer_id))));
+-- collections / invoice_followups already require a visible invoice (EXISTS on invoices), so they follow the invoices rule
+-- person-level kg (no customer names) for dashboards and target cards: team view for admins/accounts/info@/targets cap; own only for marketing
+create or replace function kg_by_person() returns table(fy text, month text, exec_id uuid, kg numeric)
+ language sql stable security definer set search_path = public as $$
+ select s.fy, s.month, s.exec_id, sum(s.qty) from customerwise_sales s
+ where auth.uid() is not null and (is_full() or has_role('accounts') or has_cap('sales_import') or has_cap('targets') or s.exec_id = auth.uid())
+ group by 1,2,3 order by 2 $$;
+revoke all on function kg_by_person() from public, anon; grant execute on function kg_by_person() to authenticated;
+revoke all on function cust_mine(uuid) from public, anon; grant execute on function cust_mine(uuid) to authenticated;
+-- (live: info@ was given the 'customers' cap in Setup → Users)
+drop policy if exists cap_cust_i on customers; create policy cap_cust_i on customers for insert with check (has_cap('customers'));
+drop policy if exists cap_cust_u on customers; create policy cap_cust_u on customers for update using (has_cap('customers'));
 
 -- ---------- make the first HR Admin (run separately, replace the placeholder; never commit a real email)
 -- update profiles set role='hr_admin' where email = 'HR_ADMIN_EMAIL_PLACEHOLDER';
