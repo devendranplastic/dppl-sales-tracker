@@ -97,3 +97,7 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
 ## v1.9.2: factory manager can view Sales analysis
 - The **fm** login (factory manager) gets the read-only **Sales analysis** screen with the full team view, the same as Accounts. That covers volume LY vs CY by person, product and customer, tons target vs actual, month-wise tables, charts and the Excel download. fm also gets the read-only **Sales (ERP)** tab, as Accounts does.
 - No upload or edit rights. The database adds SELECT-only policies for factory_manager on customerwise_sales, sales_lines and sales_invoices.
+
+## v1.9.3: latest month by marketing person on team dashboards
+- The dashboard for team-view logins (FM, CEO, MD, HR Admin, Accounts, info@, planning, despatch) has a new table under the summary cards: **"<latest month> by marketing person (tons)"**. It shows, per marketing person, the actual tons for the latest uploaded month, the target for that month, % achieved, the same month last year and the change. A team total row is included.
+- Marketing logins are unchanged: they still see only their own figures.
