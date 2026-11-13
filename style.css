@@ -49,3 +49,5 @@ button{background:var(--red);color:#fff;border:0;border-radius:6px;padding:8px 1
 .pc{display:inline-block;padding:1px 6px;border-radius:8px;font-weight:700;font-size:12px}.pc.pg{background:#d9f2dd;color:#1b6b2a}.pc.pa{background:#fff0c2;color:#8a6100}.pc.pr{background:#fde0e0;color:#b3151a}table.tva td{white-space:nowrap;vertical-align:top}h3{color:var(--navy);font-size:15px;margin:14px 0 6px}
 .rf{background:none!important;color:var(--navy)!important;font-size:22px;padding:4px 10px!important;margin-top:0!important;min-width:44px}.rf.spin{animation:spin 1s linear infinite}.rf.new{color:var(--red)!important}@keyframes spin{to{transform:rotate(360deg)}}header.top .upd{white-space:nowrap}
 @media (max-width:767px){header.top .upd{display:none}}
+
+[hidden]{display:none!important}.ncbox .warn{margin-top:6px}.ncbox .warn button{margin:2px 4px 2px 0;padding:4px 10px}

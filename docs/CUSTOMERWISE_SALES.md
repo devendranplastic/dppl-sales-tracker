@@ -80,3 +80,10 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
   - the kg target vs actual tables.
 - The database grants these roles **read** access to visits, targets and `kg_by_person()`. Write access is unchanged.
 - The marketing-team restrictions from v1.8.0 are unchanged.
+
+## v1.9.0: marketing can type a new customer (enquiry, visit report, sample request)
+- In **New enquiry**, **Log today's visit** and **New sample request**, a marketing person picks one of their own customers or chooses **➕ New customer** and types the name (contact, city and phone are optional). While typing, close matches from their own list are suggested; an exact match (ignoring case, spaces and punctuation) is reused instead of creating a duplicate.
+- The database function `new_customer_from_form` creates the customer owned by the person who saved it (it cannot be set to anyone else) and flags it **needs review**. Marketing still cannot rename, edit, re-assign or delete customers.
+- **info@ / HR Admin** see a "need review" banner and badge on Customers: **Review** (rename, contact, owner, mark reviewed), **✔ OK**, and **Merge duplicate** (`merge_customers`: moves enquiries, visits, samples, SKUs, orders, invoices and sales rows, keeps the old spelling as an alias, deletes the duplicate). Renaming also updates the customer name on its visit reports.
+- **Customerwise upload**: pending customers are listed first in the customer choice, with **✎ Rename … to this file name** or **→ keep its name**. Pending customers that the file matches or maps are marked reviewed after the import.
+- Visits and samples now store `customer_id`. A sample may be recorded against a customer before an enquiry exists.

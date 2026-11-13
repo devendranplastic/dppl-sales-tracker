@@ -440,7 +440,7 @@ alter table sales_lines add column if not exists gross_total numeric;
 create index if not exists sales_lines_cust on sales_lines(customer_id);
 -- only management may change who owns a customer
 create or replace function trg_cust_owner() returns trigger language plpgsql as $$
-begin if new.exec_id is distinct from old.exec_id and not is_full() and coalesce(current_setting('dppl.owner_sync',true),'')<>'on' then raise exception 'Only HR Admin / MD can change the customer''s marketing owner'; end if; return new; end $$;
+begin if new.exec_id is distinct from old.exec_id and not (is_full() or has_cap('customers')) and coalesce(current_setting('dppl.owner_sync',true),'')<>'on' then raise exception 'Only HR Admin / info@ can change the customer''s marketing owner'; end if; return new; end $$;
 drop trigger if exists t_cust_owner on customers; create trigger t_cust_owner before update on customers for each row execute function trg_cust_owner();
 do $$ declare t text; begin foreach t in array array['product_variants','sales_invoices'] loop
   execute format('alter table %I enable row level security',t);
@@ -638,8 +638,269 @@ insert into incentive_rules(name,min_qty,min_value,margin_from,margin_to,pct)
  where not exists (select 1 from incentive_rules);
 insert into settings(margin_min_pct) select 12 where not exists (select 1 from settings);
 
+-- ---------- v1.6.0: dashboards for every login + live refresh
+-- Accounts and sales-upload users (info@) see all kg targets for the team dashboard
+drop policy if exists r_tgt_sales on targets; create policy r_tgt_sales on targets for select using (has_role('accounts') or has_cap('sales_import') or has_cap('targets'));
+-- Company kg per month (no customer detail) for roles without sales access (planning, dispatch, factory): actual + target totals
+create or replace function team_kg_monthly() returns table(fy text, month text, kg numeric, target_kg numeric)
+ language sql stable security definer set search_path = public as $$
+ with a as (select fy, month, sum(qty) kg from customerwise_sales group by fy, month),
+      t as (select period as month, sum(qty) as target_kg from targets where period ~ '^\d{4}-\d{2}$' and qty is not null group by period)
+ select coalesce(a.fy, case when substr(t.month,6,2)::int>=4 then substr(t.month,1,4)||'-'||lpad(((substr(t.month,1,4)::int+1)%100)::text,2,'0') else (substr(t.month,1,4)::int-1)::text||'-'||substr(t.month,3,2) end) as fy,
+        coalesce(a.month, t.month) as month, coalesce(a.kg,0) as kg, t.target_kg
+ from a full join t on t.month = a.month where auth.uid() is not null order by 2 $$;
+revoke all on function team_kg_monthly() from public, anon; grant execute on function team_kg_monthly() to authenticated;
+-- Realtime: the app re-loads when these change (RLS still applies to every subscriber)
+do $$ declare t text; begin
+ foreach t in array array['customerwise_uploads','targets','orders','enquiries','visits','tasks','messages','message_recipients','dispatch_plans','sales_uploads'] loop
+  if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then execute format('alter publication supabase_realtime add table public.%I', t); end if;
+ end loop; end $$;
+
+-- ---------- v1.7.0: marketing persons see only their own customers (Bala t43u); only HR Admin / info@ add or edit customers
+create or replace function is_mkt() returns boolean language sql stable security definer set search_path = public as $$ select coalesce((select role='marketing' from profiles where id=auth.uid() and active),false) $$;
+create or replace function cust_mine(c uuid) returns boolean language sql stable security definer set search_path = public as $$ select exists(select 1 from customers where id=c and exec_id=auth.uid()) $$;
+create or replace function can_cust_write() returns boolean language sql stable security definer set search_path = public as $$ select is_admin() or has_cap('customers') or has_cap('sales_import') $$;
+-- restrictive policies are AND-ed with the existing permissive ones, so other roles keep their current access
+drop policy if exists mk_own_customers on customers; create policy mk_own_customers on customers as restrictive for select using (not is_mkt() or exec_id = auth.uid());
+drop policy if exists cw_cust_i on customers; create policy cw_cust_i on customers as restrictive for insert with check (can_cust_write());
+drop policy if exists cw_cust_u on customers; create policy cw_cust_u on customers as restrictive for update using (can_cust_write() or has_role('accounts'));
+do $$ declare t text; begin
+ foreach t in array array['customerwise_sales','orders','invoices','sales_invoices','sales_lines','complaints','customer_history','dispatch_plans','skus'] loop
+  execute format('drop policy if exists mk_own_%1$s on %1$I', t);
+  execute format('create policy mk_own_%1$s on %1$I as restrictive for select using (not is_mkt() or customer_id is null or cust_mine(customer_id))', t);
+ end loop; end $$;
+drop policy if exists mk_own_samples on samples; create policy mk_own_samples on samples as restrictive for select using (not is_mkt() or sku_id is null or exists(select 1 from skus s where s.id=samples.sku_id and (s.customer_id is null or cust_mine(s.customer_id))));
+drop policy if exists mk_own_artworks on artworks; create policy mk_own_artworks on artworks as restrictive for select using (not is_mkt() or sku_id is null or exists(select 1 from skus s where s.id=artworks.sku_id and (s.customer_id is null or cust_mine(s.customer_id))));
+drop policy if exists mk_own_order_stages on order_stages; create policy mk_own_order_stages on order_stages as restrictive for select using (not is_mkt() or exists(select 1 from orders o where o.id=order_stages.order_id and (o.customer_id is null or cust_mine(o.customer_id))));
+drop policy if exists mk_own_dispatches on dispatches; create policy mk_own_dispatches on dispatches as restrictive for select using (not is_mkt() or exists(select 1 from orders o where o.id=dispatches.order_id and (o.customer_id is null or cust_mine(o.customer_id))));
+-- collections / invoice_followups already require a visible invoice (EXISTS on invoices), so they follow the invoices rule
+-- person-level kg (no customer names) for dashboards and target cards: team view for admins/accounts/info@/targets cap; own only for marketing
+create or replace function kg_by_person() returns table(fy text, month text, exec_id uuid, kg numeric)
+ language sql stable security definer set search_path = public as $$
+ select s.fy, s.month, s.exec_id, sum(s.qty) from customerwise_sales s
+ where auth.uid() is not null and (is_full() or has_role('accounts') or has_cap('sales_import') or has_cap('targets') or s.exec_id = auth.uid())
+ group by 1,2,3 order by 2 $$;
+revoke all on function kg_by_person() from public, anon; grant execute on function kg_by_person() to authenticated;
+revoke all on function cust_mine(uuid) from public, anon; grant execute on function cust_mine(uuid) to authenticated;
+-- (live: info@ was given the 'customers' cap in Setup → Users)
+drop policy if exists cap_cust_i on customers; create policy cap_cust_i on customers for insert with check (has_cap('customers'));
+drop policy if exists cap_cust_u on customers; create policy cap_cust_u on customers for update using (has_cap('customers'));
+
+-- ---------- v1.8.0: marketing (Nathan, Jesaon, Suresh, Sanjeev) see only their own person-level data; Balaji = CEO (full view) but still a sales person
+create or replace function is_seller(u uuid) returns boolean language sql stable security definer set search_path=public as
+ $$ select exists(select 1 from profiles where id=u and (role='marketing' or 'sales_person'=any(coalesce(caps,'{}')))) $$;
+grant execute on function is_seller(uuid) to authenticated;
+create or replace function enq_mine(e uuid) returns boolean language sql stable security definer set search_path=public as
+ $$ select exists(select 1 from enquiries where id=e and owner_id=auth.uid()) $$;
+grant execute on function enq_mine(uuid) to authenticated;
+-- targets may be set for any sales person (marketing role or sales_person cap)
+drop policy if exists cap_tgt on targets;
+create policy cap_tgt on targets for all using (has_cap('targets')) with check (has_cap('targets') and is_seller(exec_id));
+-- restrictive own-person rules for role=marketing
+do $$ declare t text; begin
+  foreach t in array array['enquiries','tasks'] loop
+    execute format('drop policy if exists mk_self_%1$s on %1$s', t);
+    execute format('create policy mk_self_%1$s on %1$s as restrictive for all to authenticated using (not is_mkt() or owner_id=auth.uid()) with check (not is_mkt() or owner_id=auth.uid())', t);
+  end loop;
+  foreach t in array array['quotations','specs','activities'] loop
+    execute format('drop policy if exists mk_self_%1$s on %1$s', t);
+    execute format('create policy mk_self_%1$s on %1$s as restrictive for all to authenticated using (not is_mkt() or enquiry_id is null or enq_mine(enquiry_id)) with check (not is_mkt() or enquiry_id is null or enq_mine(enquiry_id))', t);
+  end loop;
+  drop policy if exists mk_self_visits on visits;
+  create policy mk_self_visits on visits as restrictive for all to authenticated using (not is_mkt() or by_id=auth.uid()) with check (not is_mkt() or by_id=auth.uid());
+  drop policy if exists mk_self_targets on targets;
+  create policy mk_self_targets on targets as restrictive for select to authenticated using (not is_mkt() or exec_id=auth.uid());
+  foreach t in array array['customerwise_sales','sales_lines','sales_invoices','invoices'] loop
+    execute format('drop policy if exists mk_self_%1$s on %1$s', t);
+    execute format('create policy mk_self_%1$s on %1$s as restrictive for select to authenticated using (not is_mkt() or exec_id is null or exec_id=auth.uid())', t);
+  end loop;
+  -- other marketing people's profiles are hidden from marketing (names of non-marketing staff stay visible)
+  drop policy if exists mk_self_profiles on profiles;
+  create policy mk_self_profiles on profiles as restrictive for select to authenticated using (not is_mkt() or id=auth.uid() or role<>'marketing');
+end $$;
+-- aggregates: marketing get only their own person
+create or replace function kg_by_person() returns table(fy text, month text, exec_id uuid, kg numeric) language sql stable security definer set search_path=public as $$
+ select s.fy, s.month, s.exec_id, sum(s.qty) from customerwise_sales s
+ where auth.uid() is not null and (s.exec_id = auth.uid() or (not is_mkt() and (is_full() or has_role('accounts') or has_cap('sales_import') or has_cap('targets'))))
+ group by 1,2,3 order by 2 $$;
+create or replace function team_kg_monthly() returns table(fy text, month text, kg numeric, target_kg numeric) language sql stable security definer set search_path=public as $$
+ with a as (select fy, month, sum(qty) kg from customerwise_sales where not is_mkt() or exec_id=auth.uid() group by fy, month),
+      t as (select period as month, sum(qty) as target_kg from targets where period ~ '^\d{4}-\d{2}$' and qty is not null and (not is_mkt() or exec_id=auth.uid()) group by period)
+ select coalesce(a.fy, case when substr(t.month,6,2)::int>=4 then substr(t.month,1,4)||'-'||lpad(((substr(t.month,1,4)::int+1)%100)::text,2,'0') else (substr(t.month,1,4)::int-1)::text||'-'||substr(t.month,3,2) end) as fy,
+        coalesce(a.month, t.month) as month, coalesce(a.kg,0) as kg, t.target_kg
+ from a full join t on t.month = a.month where auth.uid() is not null order by 2 $$;
+grant execute on function kg_by_person() to authenticated;
+grant execute on function team_kg_monthly() to authenticated;
+
+CREATE OR REPLACE FUNCTION public.import_customerwise(p_fy text, p_file text, p_sheet text, p_rows jsonb, p_sync_owners boolean DEFAULT true)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare r record; v_cid uuid; n_new int:=0; up uuid; v_qty numeric; n_rows int; v_sync jsonb:='{}'; v_from text; v_to text;
+begin
+  if not (is_admin() or has_cap('sales_import')) then raise exception 'Only HR Admin or a user with the sales-upload permission can import customerwise sales'; end if;
+  if p_fy is null or p_fy !~ '^\d{4}-\d{2}$' or (substr(p_fy,1,4)::int+1)%100<>substr(p_fy,6,2)::int then raise exception 'Bad financial year % (use 2025-26)', p_fy; end if;
+  v_from:=substr(p_fy,1,4)||'-04'; v_to:=(substr(p_fy,1,4)::int+1)||'-03';
+  if to_regclass('pg_temp._cw') is not null then drop table pg_temp._cw; end if;
+  create temp table _cw as select x.*, null::uuid cid, null::uuid xid from jsonb_to_recordset(p_rows) as x(src_row int, exec text, exec_id uuid, product text, customer text, customer_id uuid, month text, qty numeric);
+  update _cw set customer=nullif(regexp_replace(trim(customer),'\s+',' ','g'),''), exec=nullif(trim(exec),''), product=nullif(trim(product),'');
+  if exists(select 1 from _cw where customer is null or qty is null or month is null) then raise exception 'Every row needs Customer Name, month and quantity'; end if;
+  if exists(select 1 from _cw where month !~ '^\d{4}-\d{2}$' or month<v_from or month>v_to) then raise exception 'Rows outside FY % (Apr % – Mar %)', p_fy, v_from, v_to; end if;
+  -- customers: app suggestion (if it exists) -> exact name / saved alias -> create
+  update _cw g set cid=g.customer_id where g.customer_id is not null and exists(select 1 from customers c where c.id=g.customer_id);
+  update _cw g set cid=(select id from customers c where norm_key(c.name)=norm_key(g.customer) or norm_key(g.customer)=any(select norm_key(a) from unnest(c.name_aliases) a) order by created_at limit 1) where g.cid is null;
+  for r in select distinct on (norm_key(customer)) customer from _cw where cid is null order by norm_key(customer), src_row loop
+    insert into customers(name,mobile,source,created_by) values(r.customer,'','customerwise sales',auth.uid()) returning id into v_cid; n_new:=n_new+1;
+    update _cw set cid=v_cid where cid is null and norm_key(customer)=norm_key(r.customer); end loop;
+  -- remember the file's spelling so next month's upload matches exactly
+  update customers c set name_aliases=c.name_aliases||a.names from (select cid, array_agg(distinct customer) names from _cw g group by cid) a
+    where c.id=a.cid and not (a.names <@ (c.name_aliases||c.name));
+  -- marketing person: app suggestion (must be a marketing profile) -> saved alias -> name / email / emp code; unknown names stay as text (exec_raw)
+  update _cw g set xid=g.exec_id from profiles p where g.exec_id is not null and p.id=g.exec_id and is_seller(p.id);
+  update _cw g set xid=a.exec_id from exec_aliases a where g.xid is null and g.exec is not null and a.alias=norm_key(g.exec) and not a.is_common;
+  update _cw g set xid=p.id from profiles p where g.xid is null and g.exec is not null and is_seller(p.id)
+    and norm_key(g.exec) in (norm_key(p.full_name),norm_key(split_part(p.email,'@',1)),norm_key(p.email),nullif(norm_key(p.emp_code),''));
+  insert into exec_aliases(alias,raw_name,exec_id) select distinct on (norm_key(exec)) norm_key(exec), exec, xid from _cw where xid is not null and exec is not null and norm_key(exec)<>''
+    order by norm_key(exec) on conflict (alias) do update set exec_id=excluded.exec_id, raw_name=excluded.raw_name, is_common=false;
+  delete from customerwise_uploads where fy=p_fy;
+  select coalesce(sum(qty),0), count(*) into v_qty, n_rows from _cw;
+  insert into customerwise_uploads(fy,file_name,sheet,lines,rows,total_qty,months_covered)
+    values(p_fy,p_file,p_sheet,(select count(distinct src_row) from _cw),n_rows,v_qty,(select coalesce(array_agg(distinct month order by month),'{}') from _cw)) returning id into up;
+  insert into customerwise_sales(upload_id,fy,month,customer_id,customer_name,product,exec_id,exec_raw,qty,src_row)
+    select up,p_fy,month,cid,customer,product,xid,exec,qty,src_row from _cw;
+  if p_sync_owners then v_sync:=sync_customer_owners_from_cws(); end if;
+  return jsonb_build_object('fy',p_fy,'rows',n_rows,'lines',(select lines from customerwise_uploads where id=up),'qty',v_qty,'customers',(select count(distinct cid) from _cw),'customers_new',n_new,
+    'unmatched_execs',(select coalesce(jsonb_agg(distinct exec),'[]') from _cw where xid is null and exec is not null),
+    'by_exec',(select jsonb_object_agg(k,q) from (select coalesce(p.full_name,g.exec,'(blank)') k, sum(g.qty) q from _cw g left join profiles p on p.id=g.xid group by 1) z))||v_sync;
+end $function$;
+
+CREATE OR REPLACE FUNCTION public.assign_customer_execs(p jsonb)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+declare r record; n int:=0;
+begin
+  if not is_admin() then raise exception 'Only HR Admin can assign customer owners'; end if;
+  for r in select * from jsonb_to_recordset(p) as x(customer_id uuid, exec_id uuid) loop
+    if r.exec_id is not null and not exists(select 1 from profiles where id=r.exec_id and (role='marketing' or 'sales_person'=any(coalesce(caps,'{}')))) then raise exception 'Not a marketing person: %', r.exec_id; end if;
+    update customers set exec_id=r.exec_id where id=r.customer_id and exec_id is distinct from r.exec_id;
+    update sales_lines set exec_id=r.exec_id, is_common=r.exec_id is null, exec_source=case when r.exec_id is null then null else 'customer' end
+      where customer_id=r.customer_id and coalesce(exec_source,'') not in ('file','file-common');
+    update sales_invoices set exec_id=r.exec_id, is_common=r.exec_id is null, exec_source=case when r.exec_id is null then null else 'customer' end
+      where customer_id=r.customer_id and coalesce(exec_source,'') not in ('file','file-common');
+    n:=n+1; end loop;
+  return n; end $function$;
+
+-- live data change (v1.8, not part of a fresh install): Balaji -> role 'ceo' with caps {targets,broadcast,sales_person}
+
+-- ---------- v1.8.1: every non-marketing role gets read-only team marketing views (discipline, per-person kg, targets)
+drop policy if exists r_vis_nonmkt on visits;
+create policy r_vis_nonmkt on visits for select to authenticated using (signed_in() and not is_mkt());
+drop policy if exists r_tgt_nonmkt on targets;
+create policy r_tgt_nonmkt on targets for select to authenticated using (signed_in() and not is_mkt());
+create or replace function kg_by_person() returns table(fy text, month text, exec_id uuid, kg numeric) language sql stable security definer set search_path=public as $$
+ select s.fy, s.month, s.exec_id, sum(s.qty) from customerwise_sales s
+ where auth.uid() is not null and signed_in() and (s.exec_id = auth.uid() or not is_mkt())
+ group by 1,2,3 order by 2 $$;
+grant execute on function kg_by_person() to authenticated;
+
 -- ---------- make the first HR Admin (run separately, replace the placeholder; never commit a real email)
 -- update profiles set role='hr_admin' where email = 'HR_ADMIN_EMAIL_PLACEHOLDER';
+
+-- ---------- v1.9.0 (Bala t47u/t48u/t49u): marketing may type a NEW customer name in New enquiry, Visit report and Sample request.
+-- The customer is created server-side, owned by the caller (not spoofable), flagged needs_review; only info@ (customers cap) / HR Admin
+-- can rename, change owner, mark reviewed or merge it (also during the monthly customerwise upload). Additive: live v1.8.1 UI unaffected.
+alter table customers add column if not exists needs_review boolean not null default false;
+alter table customers add column if not exists review_note text;
+alter table customers add column if not exists reviewed_by uuid references profiles(id);
+alter table customers add column if not exists reviewed_at timestamptz;
+alter table visits  add column if not exists customer_id uuid references customers(id);
+alter table samples add column if not exists customer_id uuid references customers(id);
+create index if not exists customers_needs_review_idx on customers(needs_review) where needs_review;
+create index if not exists visits_customer_idx on visits(customer_id);
+create index if not exists samples_customer_idx on samples(customer_id);
+
+-- create (or find) a customer from a marketing form; owner = caller (or the executive info@ types for)
+create or replace function new_customer_from_form(p_name text, p_source text default 'enquiry', p_contact text default null, p_city text default null, p_mobile text default null)
+ returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); v_owner uuid; v_mgr boolean; v_name text; v_id uuid; v_ex record; v_note text;
+begin
+  if v_uid is null or not exists(select 1 from profiles where id=v_uid and active) then raise exception 'Not signed in'; end if;
+  v_mgr := is_admin() or has_cap('customers');
+  v_owner := case when is_seller(v_uid) then v_uid else acting_for() end;
+  if not v_mgr and (v_owner is null or not is_seller(v_owner)) then raise exception 'Only a marketing person (or info@ / HR Admin) can add a customer here'; end if;
+  if coalesce(p_source,'') not in ('enquiry','visit','sample') then raise exception 'Bad source %', p_source; end if;
+  v_name := regexp_replace(trim(coalesce(p_name,'')),'\s+',' ','g');
+  if length(v_name) < 2 or length(v_name) > 150 or norm_key(v_name) = '' then raise exception 'Enter the customer name (2–150 characters)'; end if;
+  -- duplicate check (case / space / punctuation-insensitive, aliases too): own list for marketing, whole list for info@ / HR
+  select id, name into v_ex from customers c
+   where (norm_key(c.name)=norm_key(v_name) or norm_key(v_name)=any(select norm_key(a) from unnest(c.name_aliases) a))
+     and (v_mgr or c.exec_id = v_owner) order by created_at limit 1;
+  if found then return jsonb_build_object('id',v_ex.id,'name',v_ex.name,'existing',true); end if;
+  if exists(select 1 from customers c where norm_key(c.name)=norm_key(v_name) or norm_key(v_name)=any(select norm_key(a) from unnest(c.name_aliases) a)) then
+    v_note := 'Same name already exists in the customer list (another owner / unassigned) — check and merge'; end if;
+  insert into customers(name, mobile, city, contact, exec_id, source, created_by, needs_review, review_note)
+   values(v_name, coalesce(nullif(trim(p_mobile),''),''), nullif(trim(p_city),''), nullif(trim(p_contact),''), v_owner, p_source, v_uid, not v_mgr, v_note)
+   returning id into v_id;
+  return jsonb_build_object('id',v_id,'name',v_name,'existing',false,'needs_review',not v_mgr);
+end $$;
+revoke all on function new_customer_from_form(text,text,text,text,text) from public, anon;
+grant execute on function new_customer_from_form(text,text,text,text,text) to authenticated;
+
+-- merge a duplicate into the correct customer: moves every linked record, keeps the duplicate's spelling as an alias, deletes the duplicate
+create or replace function merge_customers(p_from uuid, p_into uuid) returns jsonb language plpgsql security definer set search_path = public as $$
+declare f customers; t customers; n jsonb := '{}'; k int; tb text;
+begin
+  if not (is_admin() or has_cap('customers')) then raise exception 'Only info@ / HR Admin can merge customers'; end if;
+  if p_from = p_into then raise exception 'Pick two different customers'; end if;
+  select * into f from customers where id=p_from for update; select * into t from customers where id=p_into for update;
+  if f.id is null or t.id is null then raise exception 'Customer not found'; end if;
+  if exists(select 1 from skus a join skus b on b.sku_code=a.sku_code where a.customer_id=p_from and b.customer_id=p_into) then
+    raise exception 'Both customers have the same SKU code(s) — rename or remove the duplicate SKU first'; end if;
+  foreach tb in array array['enquiries','skus','orders','invoices','complaints','customer_history','sales_lines','dispatch_plans','sales_invoices','customerwise_sales','samples'] loop
+    execute format('update %I set customer_id=$1 where customer_id=$2', tb) using p_into, p_from; get diagnostics k = row_count;
+    if k>0 then n := n || jsonb_build_object(tb,k); end if; end loop;
+  update visits set customer_id=p_into, customer_name=t.name where customer_id=p_from or (customer_id is null and norm_key(customer_name)=norm_key(f.name));
+  get diagnostics k = row_count; if k>0 then n := n || jsonb_build_object('visits',k); end if;
+  if f.customer_code is not null and t.customer_code is null then update customers set customer_code=null where id=p_from; update customers set customer_code=f.customer_code where id=p_into; end if;
+  update customers set name_aliases = (select coalesce(array_agg(distinct a),'{}') from unnest(t.name_aliases || f.name_aliases || f.name) a where a<>t.name),
+    contact=coalesce(contact,f.contact), city=coalesce(city,f.city), mobile=coalesce(nullif(mobile,''),nullif(f.mobile,''),''), gstin=coalesce(gstin,f.gstin),
+    segment=coalesce(segment,f.segment), exec_id=coalesce(exec_id,f.exec_id), updated_at=now() where id=p_into;
+  delete from customers where id=p_from;
+  return jsonb_build_object('merged',f.name,'into',t.name,'moved',n);
+end $$;
+revoke all on function merge_customers(uuid,uuid) from public, anon;
+grant execute on function merge_customers(uuid,uuid) to authenticated;
+
+-- review stamp + keep visit names in step with renames
+create or replace function trg_cust_review() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op='UPDATE' then
+    if (new.needs_review is distinct from old.needs_review or new.review_note is distinct from old.review_note) and not (is_admin() or has_cap('customers') or auth.uid() is null)
+      then raise exception 'Only info@ / HR Admin can review customers'; end if;
+    if old.needs_review and not new.needs_review then new.reviewed_by := auth.uid(); new.reviewed_at := now(); end if;
+  end if; return new; end $$;
+drop trigger if exists t_cust_review on customers; create trigger t_cust_review before update on customers for each row execute function trg_cust_review();
+create or replace function trg_cust_rename() returns trigger language plpgsql security definer set search_path = public as $$
+begin if new.name is distinct from old.name then update visits set customer_name=new.name where customer_id=new.id; end if; return null; end $$;
+drop trigger if exists t_cust_rename on customers; create trigger t_cust_rename after update of name on customers for each row execute function trg_cust_rename();
+
+-- marketing: a visit / sample may only point at one of their own customers; samples follow own customer + own enquiry
+-- (visits: insert/update check only, so a marketing person still sees his own visit after info@ merges the customer into someone else's)
+drop policy if exists mk_own_vis_cust on visits;
+drop policy if exists mk_own_vis_cust_i on visits;
+create policy mk_own_vis_cust_i on visits as restrictive for insert to authenticated with check (not is_mkt() or customer_id is null or cust_mine(customer_id));
+drop policy if exists mk_own_vis_cust_u on visits;
+create policy mk_own_vis_cust_u on visits as restrictive for update to authenticated using (true) with check (not is_mkt() or customer_id is null or cust_mine(customer_id));
+drop policy if exists mk_own_smp_cust on samples;
+create policy mk_own_smp_cust on samples as restrictive for all to authenticated
+ using (not is_mkt() or ((customer_id is null or cust_mine(customer_id)) and (enquiry_id is null or enq_mine(enquiry_id))))
+ with check (not is_mkt() or ((customer_id is null or cust_mine(customer_id)) and (enquiry_id is null or enq_mine(enquiry_id))));
+drop policy if exists mk_own_enq_cust on enquiries;
+create policy mk_own_enq_cust on enquiries as restrictive for all to authenticated using (true) with check (not is_mkt() or customer_id is null or cust_mine(customer_id));
 
 -- >>>>> storage.sql
 -- PO file storage (private bucket 'po-files'). Safe to re-run.

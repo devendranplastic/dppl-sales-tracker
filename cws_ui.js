@@ -24,7 +24,8 @@ window.dlCwsTemplate=dlTpl;
 // ---------- matching plan (preview; the database re-checks every suggestion)
 function plan(){const M=CWS.matcher(D.customers||[]),X=CWS.execMatcher(D.profiles,D.exec_aliases),cm={},xm={};
  for(const p of CW.sheets||[])for(const l of p.lines){const n=l.customer;if(!cm[n]){const ch=CW.cust[n];let m=null;
-   if(ch&&ch!=='__new'){const c=(D.customers||[]).find(c=>c.id===ch);if(c)m={c,how:'chosen'}}else if(!ch)m=M(n);
+   if(ch&&ch.startsWith('__ren:')){const c=(D.customers||[]).find(c=>c.id===ch.slice(6));if(c)m={c,how:'rename'}}
+   else if(ch&&ch!=='__new'){const c=(D.customers||[]).find(c=>c.id===ch);if(c)m={c,how:'chosen'}}else if(!ch)m=M(n);
    if(m)M.learn(n,m.c);cm[n]=m||{isNew:true}}
   const e=l.exec||'';if(e&&!xm[e]){const ch=CW.exec[e];xm[e]=ch==='__text'?{unmatched:true,how:'text'}:ch?{id:ch,how:'chosen'}:X(e)}}
  return{cm,xm}}
@@ -47,12 +48,15 @@ function cwsCard(){if(!can(U,'io_sales'))return'';const S=CW.sheets;let h=`<div 
  <div><label>Uploaded years</label>${(D.customerwise_uploads||[]).slice().sort((a,b)=>a.fy<b.fy?1:-1).map(u=>`<div><small><b>FY ${u.fy}</b> · ${lk(u.total_qty)} · ${(u.months_covered||[]).length} months · ${fd(u.created_at)} by ${esc(pname(u.uploaded_by))}</small></div>`).join('')||'<small>none yet</small>'}</div></div>
  ${CW.msg?`<div class="warn">${CW.msg}</div>`:''}</div>`;
  if(S&&S.error)h+=`<div class="card"><p class="bad">${esc(S.error)}</p></div>`;
- if(S&&!S.error){const P=plan(),names=Object.keys(P.cm),nw=names.filter(n=>P.cm[n].isNew),fz=names.filter(n=>P.cm[n].how==='fuzzy'||P.cm[n].how==='chosen'),ex=names.length-nw.length-fz.length;
+ if(S&&!S.error){const P=plan(),names=Object.keys(P.cm),nw=names.filter(n=>P.cm[n].isNew),fz=names.filter(n=>['fuzzy','chosen','rename'].includes(P.cm[n].how)),ex=names.length-nw.length-fz.length;
   const un=Object.keys(P.xm).filter(k=>!P.xm[k].id),fx=Object.keys(P.xm).filter(k=>P.xm[k].id&&['fuzzy','chosen'].includes(P.xm[k].how));
-  const opts=sel=>`<option value="">(automatic)</option><option value="__new" ${sel==='__new'?'selected':''}>➕ create as new customer</option>${(D.customers||[]).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}`;
+  const PEND=(D.customers||[]).filter(c=>c.needs_review).sort((a,b)=>a.name.localeCompare(b.name)),pl=c=>`${esc(c.name)} — new from ${esc(NC.SRC[c.source]||c.source||'form')}${c.exec_id?' · '+esc(pname(c.exec_id)):''}`;
+  const opts=sel=>`<option value="">(automatic)</option><option value="__new" ${sel==='__new'?'selected':''}>➕ create as new customer</option>${PEND.length?`<optgroup label="New customers from enquiries / visits / samples (pending review)">${PEND.map(c=>`<option value="__ren:${c.id}" ${sel==='__ren:'+c.id?'selected':''}>✎ Rename “${pl(c)}” to this file name</option><option value="${c.id}" ${sel===c.id?'selected':''}>→ ${pl(c)} (keep its name)</option>`).join('')}</optgroup><optgroup label="All customers">`:''}${(D.customers||[]).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}${PEND.length?'</optgroup>':''}`;
+  const pm=new Set(names.map(n=>P.cm[n].c&&P.cm[n].c.needs_review?P.cm[n].c.id:null).filter(Boolean)),pu=PEND.filter(c=>!pm.has(c.id));
   h+=`<div class="card tw"><h2>Preview — ${esc(CW.file)}</h2>${S.map(p=>sheetCard(p,P)).join('')}
   <div class="card"><h3>Customers: ${ex} matched by name · ${fz.length} close matches · ${nw.length} new</h3><p><small>Pick the right customer if a close match is wrong or a “new” one already exists under another name. Choices are remembered for next month's upload.</small></p>
-  ${fz.length?`<details open><summary>${fz.length} close match(es) — please check</summary><table><tr><th>Name in file</th><th>Matched to</th></tr>${fz.map(n=>`<tr><td>${esc(n)}</td><td><select data-cwc="${esc(n)}">${opts(CW.cust[n]||P.cm[n].c.id)}</select></td></tr>`).join('')}</table></details>`:''}
+  ${PEND.length?`<p class="note" id="cwPend"><b>${PEND.length} new customer(s) typed by marketing are pending review.</b> ${pm.size?pm.size+' matched to this file (they will be marked reviewed). ':''}If the file spells one differently, choose <b>✎ Rename … to this file name</b> (or <b>→ keep its name</b>) against that file name below, so names stay the same in the app and in next month's file.${pu.length?`<br><small>Not in this file yet: ${pu.map(c=>esc(c.name)).join(', ')}</small>`:''}</p>`:''}
+  ${fz.length?`<details open><summary>${fz.length} close match(es) — please check</summary><table><tr><th>Name in file</th><th>Matched to</th></tr>${fz.map(n=>`<tr><td>${esc(n)}</td><td><select data-cwc="${esc(n)}">${opts(CW.cust[n]||P.cm[n].c.id)}</select>${P.cm[n].c.needs_review&&P.cm[n].how!=='rename'?' <small class="tag risk">pending review</small>':''}</td></tr>`).join('')}</table></details>`:''}
   ${nw.length?`<details ${fz.length?'':'open'}><summary>${nw.length} new customer(s) — not found in the app</summary><table><tr><th>Name in file</th><th>Action</th></tr>${nw.map(n=>`<tr><td>${esc(n)}</td><td><select data-cwc="${esc(n)}">${opts(CW.cust[n]||'')}</select></td></tr>`).join('')}</table></details>`:''}</div>
   ${un.length||fx.length?`<div class="card"><h3>Marketing person names</h3><table>${[...fx,...un].map(k=>`<tr><td>${esc(k)}</td><td><select data-cwx="${esc(k)}"><option value="">(automatic${P.xm[k].id?': '+esc(xname(P.xm[k])):''})</option><option value="__text" ${CW.exec[k]==='__text'?'selected':''}>No login yet — keep the name only</option>${mkt().map(x=>`<option value="${x.id}" ${CW.exec[k]===x.id?'selected':''}>${esc(x.full_name||x.email)}</option>`).join('')}</select></td></tr>`).join('')}</table>
    <small>A name without a login (e.g. a new marketing person) is kept in the analysis under that name; HR Admin can create the login later and re-upload.</small></div>`:''}
@@ -83,12 +87,16 @@ function bind_cws(){document.querySelectorAll('[data-cwt]').forEach(b=>b.onclick
   for(const p of S){if(!(CW.fy[p.sheet]||p.fy))return alert('Choose the financial year for sheet '+p.sheet);if(p.errors.length&&!confirm(`Sheet ${p.sheet}: ${p.errors.length} row(s) have errors and will be skipped. Continue?`))return}
   const fys=S.map(p=>CW.fy[p.sheet]||p.fy);if(new Set(fys).size<fys.length)return alert('Two sheets have the same financial year — untick one.');
   const rep=fys.filter(f=>(D.customerwise_uploads||[]).some(u=>u.fy===f));if(rep.length&&!confirm(`These years are already uploaded and will be replaced:\nFY ${rep.join(', FY ')}\n\nContinue?`))return;
+  const ren=Object.entries(CW.cust).filter(([n,v])=>v.startsWith('__ren:')).map(([n,v])=>({n,id:v.slice(6)}));
+  if(new Set(ren.map(r=>r.id)).size<ren.length)return alert('The same pending customer is chosen for “rename” on two different file names — pick one; map the other with “→ keep its name”.');
   CW.busy=true;CW.res=[];render();
-  try{for(const p of S){const fy=CW.fy[p.sheet]||p.fy,MS=CWS.fyMonths(fy);
+  try{for(const r of ren)await DB.update('customers',r.id,{name:r.n,needs_review:false});
+   for(const p of S){const fy=CW.fy[p.sheet]||p.fy,MS=CWS.fyMonths(fy);
     const rows=p.lines.flatMap(l=>Object.entries(l.months).map(([i,q])=>({src_row:l.src_row,exec:l.exec,exec_id:(P.xm[l.exec]||{}).id||null,product:l.product,customer:l.customer,customer_id:CW.cust[l.customer]==='__new'?null:((P.cm[l.customer]||{}).c||{}).id||null,month:MS[i],qty:q})));
     let r;if(DB.mode==='Supabase'){const{data,error}=await sb.rpc('import_customerwise',{p_fy:fy,p_file:CW.file,p_sheet:p.sheet,p_rows:rows,p_sync_owners:true});if(error)throw new Error('FY '+fy+': '+error.message);r=data}else r=await importLocal(fy,CW.file,p.sheet,rows);
     CW.res.push(r);await DB.insert('import_logs',{kind:'customerwise',month:fy,file_name:CW.file+' (sheet '+p.sheet+')',rows_total:p.stats.lines,added:r.rows,updated:0,rejected:p.errors.length,rejected_rows:p.errors.map(e=>({row:e.row,issues:e.issue})),by_id:U.id})}
-   CW.msg=`Imported ${CW.res.map(r=>'FY '+r.fy+': '+kg(r.qty)).join(' · ')}.`;CW.sheets=null}
+   const rv=[...new Set(Object.values(P.cm).map(m=>m.c&&m.c.needs_review?m.c.id:null).filter(Boolean))];for(const id of rv)await DB.update('customers',id,{needs_review:false});
+   CW.msg=`Imported ${CW.res.map(r=>'FY '+r.fy+': '+kg(r.qty)).join(' · ')}.${rv.length?` ${rv.length} pending customer(s) confirmed by the file${ren.length?' ('+ren.length+' renamed to the file name)':''}.`:''}`;CW.sheets=null}
   catch(err){CW.msg='<span class="bad">Import stopped: '+esc(err.message)+'</span> — years listed below were saved; fix and upload again (no duplicates).'}
   CW.busy=false;await load();render()}}
 // ---------- analysis: last year vs current year (kg)

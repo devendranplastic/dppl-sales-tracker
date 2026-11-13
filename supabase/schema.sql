@@ -801,3 +801,95 @@ grant execute on function kg_by_person() to authenticated;
 
 -- ---------- make the first HR Admin (run separately, replace the placeholder; never commit a real email)
 -- update profiles set role='hr_admin' where email = 'HR_ADMIN_EMAIL_PLACEHOLDER';
+
+-- ---------- v1.9.0 (Bala t47u/t48u/t49u): marketing may type a NEW customer name in New enquiry, Visit report and Sample request.
+-- The customer is created server-side, owned by the caller (not spoofable), flagged needs_review; only info@ (customers cap) / HR Admin
+-- can rename, change owner, mark reviewed or merge it (also during the monthly customerwise upload). Additive: live v1.8.1 UI unaffected.
+alter table customers add column if not exists needs_review boolean not null default false;
+alter table customers add column if not exists review_note text;
+alter table customers add column if not exists reviewed_by uuid references profiles(id);
+alter table customers add column if not exists reviewed_at timestamptz;
+alter table visits  add column if not exists customer_id uuid references customers(id);
+alter table samples add column if not exists customer_id uuid references customers(id);
+create index if not exists customers_needs_review_idx on customers(needs_review) where needs_review;
+create index if not exists visits_customer_idx on visits(customer_id);
+create index if not exists samples_customer_idx on samples(customer_id);
+
+-- create (or find) a customer from a marketing form; owner = caller (or the executive info@ types for)
+create or replace function new_customer_from_form(p_name text, p_source text default 'enquiry', p_contact text default null, p_city text default null, p_mobile text default null)
+ returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_uid uuid := auth.uid(); v_owner uuid; v_mgr boolean; v_name text; v_id uuid; v_ex record; v_note text;
+begin
+  if v_uid is null or not exists(select 1 from profiles where id=v_uid and active) then raise exception 'Not signed in'; end if;
+  v_mgr := is_admin() or has_cap('customers');
+  v_owner := case when is_seller(v_uid) then v_uid else acting_for() end;
+  if not v_mgr and (v_owner is null or not is_seller(v_owner)) then raise exception 'Only a marketing person (or info@ / HR Admin) can add a customer here'; end if;
+  if coalesce(p_source,'') not in ('enquiry','visit','sample') then raise exception 'Bad source %', p_source; end if;
+  v_name := regexp_replace(trim(coalesce(p_name,'')),'\s+',' ','g');
+  if length(v_name) < 2 or length(v_name) > 150 or norm_key(v_name) = '' then raise exception 'Enter the customer name (2–150 characters)'; end if;
+  -- duplicate check (case / space / punctuation-insensitive, aliases too): own list for marketing, whole list for info@ / HR
+  select id, name into v_ex from customers c
+   where (norm_key(c.name)=norm_key(v_name) or norm_key(v_name)=any(select norm_key(a) from unnest(c.name_aliases) a))
+     and (v_mgr or c.exec_id = v_owner) order by created_at limit 1;
+  if found then return jsonb_build_object('id',v_ex.id,'name',v_ex.name,'existing',true); end if;
+  if exists(select 1 from customers c where norm_key(c.name)=norm_key(v_name) or norm_key(v_name)=any(select norm_key(a) from unnest(c.name_aliases) a)) then
+    v_note := 'Same name already exists in the customer list (another owner / unassigned) — check and merge'; end if;
+  insert into customers(name, mobile, city, contact, exec_id, source, created_by, needs_review, review_note)
+   values(v_name, coalesce(nullif(trim(p_mobile),''),''), nullif(trim(p_city),''), nullif(trim(p_contact),''), v_owner, p_source, v_uid, not v_mgr, v_note)
+   returning id into v_id;
+  return jsonb_build_object('id',v_id,'name',v_name,'existing',false,'needs_review',not v_mgr);
+end $$;
+revoke all on function new_customer_from_form(text,text,text,text,text) from public, anon;
+grant execute on function new_customer_from_form(text,text,text,text,text) to authenticated;
+
+-- merge a duplicate into the correct customer: moves every linked record, keeps the duplicate's spelling as an alias, deletes the duplicate
+create or replace function merge_customers(p_from uuid, p_into uuid) returns jsonb language plpgsql security definer set search_path = public as $$
+declare f customers; t customers; n jsonb := '{}'; k int; tb text;
+begin
+  if not (is_admin() or has_cap('customers')) then raise exception 'Only info@ / HR Admin can merge customers'; end if;
+  if p_from = p_into then raise exception 'Pick two different customers'; end if;
+  select * into f from customers where id=p_from for update; select * into t from customers where id=p_into for update;
+  if f.id is null or t.id is null then raise exception 'Customer not found'; end if;
+  if exists(select 1 from skus a join skus b on b.sku_code=a.sku_code where a.customer_id=p_from and b.customer_id=p_into) then
+    raise exception 'Both customers have the same SKU code(s) — rename or remove the duplicate SKU first'; end if;
+  foreach tb in array array['enquiries','skus','orders','invoices','complaints','customer_history','sales_lines','dispatch_plans','sales_invoices','customerwise_sales','samples'] loop
+    execute format('update %I set customer_id=$1 where customer_id=$2', tb) using p_into, p_from; get diagnostics k = row_count;
+    if k>0 then n := n || jsonb_build_object(tb,k); end if; end loop;
+  update visits set customer_id=p_into, customer_name=t.name where customer_id=p_from or (customer_id is null and norm_key(customer_name)=norm_key(f.name));
+  get diagnostics k = row_count; if k>0 then n := n || jsonb_build_object('visits',k); end if;
+  if f.customer_code is not null and t.customer_code is null then update customers set customer_code=null where id=p_from; update customers set customer_code=f.customer_code where id=p_into; end if;
+  update customers set name_aliases = (select coalesce(array_agg(distinct a),'{}') from unnest(t.name_aliases || f.name_aliases || f.name) a where a<>t.name),
+    contact=coalesce(contact,f.contact), city=coalesce(city,f.city), mobile=coalesce(nullif(mobile,''),nullif(f.mobile,''),''), gstin=coalesce(gstin,f.gstin),
+    segment=coalesce(segment,f.segment), exec_id=coalesce(exec_id,f.exec_id), updated_at=now() where id=p_into;
+  delete from customers where id=p_from;
+  return jsonb_build_object('merged',f.name,'into',t.name,'moved',n);
+end $$;
+revoke all on function merge_customers(uuid,uuid) from public, anon;
+grant execute on function merge_customers(uuid,uuid) to authenticated;
+
+-- review stamp + keep visit names in step with renames
+create or replace function trg_cust_review() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op='UPDATE' then
+    if (new.needs_review is distinct from old.needs_review or new.review_note is distinct from old.review_note) and not (is_admin() or has_cap('customers') or auth.uid() is null)
+      then raise exception 'Only info@ / HR Admin can review customers'; end if;
+    if old.needs_review and not new.needs_review then new.reviewed_by := auth.uid(); new.reviewed_at := now(); end if;
+  end if; return new; end $$;
+drop trigger if exists t_cust_review on customers; create trigger t_cust_review before update on customers for each row execute function trg_cust_review();
+create or replace function trg_cust_rename() returns trigger language plpgsql security definer set search_path = public as $$
+begin if new.name is distinct from old.name then update visits set customer_name=new.name where customer_id=new.id; end if; return null; end $$;
+drop trigger if exists t_cust_rename on customers; create trigger t_cust_rename after update of name on customers for each row execute function trg_cust_rename();
+
+-- marketing: a visit / sample may only point at one of their own customers; samples follow own customer + own enquiry
+-- (visits: insert/update check only, so a marketing person still sees his own visit after info@ merges the customer into someone else's)
+drop policy if exists mk_own_vis_cust on visits;
+drop policy if exists mk_own_vis_cust_i on visits;
+create policy mk_own_vis_cust_i on visits as restrictive for insert to authenticated with check (not is_mkt() or customer_id is null or cust_mine(customer_id));
+drop policy if exists mk_own_vis_cust_u on visits;
+create policy mk_own_vis_cust_u on visits as restrictive for update to authenticated using (true) with check (not is_mkt() or customer_id is null or cust_mine(customer_id));
+drop policy if exists mk_own_smp_cust on samples;
+create policy mk_own_smp_cust on samples as restrictive for all to authenticated
+ using (not is_mkt() or ((customer_id is null or cust_mine(customer_id)) and (enquiry_id is null or enq_mine(enquiry_id))))
+ with check (not is_mkt() or ((customer_id is null or cust_mine(customer_id)) and (enquiry_id is null or enq_mine(enquiry_id))));
+drop policy if exists mk_own_enq_cust on enquiries;
+create policy mk_own_enq_cust on enquiries as restrictive for all to authenticated using (true) with check (not is_mkt() or customer_id is null or cust_mine(customer_id));
