@@ -93,3 +93,7 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
 - Per-kg rates (cost/kg, price/kg, ₹/kg) stay in ₹ per kg.
 - The database still stores rupees and kg. The upload files (customerwise kg, Tally register) and the data-entry fields (enquiry qty, PO qty, dispatch qty, targets) are still entered in kg and full rupees. Each such field shows the tons or lakhs value under it as you type.
 - The raw table export on Import / Export stays in stored units, so it can be imported back.
+
+## v1.9.2: factory manager can view Sales analysis
+- The **fm** login (factory manager) gets the read-only **Sales analysis** screen with the full team view, the same as Accounts. That covers volume LY vs CY by person, product and customer, tons target vs actual, month-wise tables, charts and the Excel download. fm also gets the read-only **Sales (ERP)** tab, as Accounts does.
+- No upload or edit rights. The database adds SELECT-only policies for factory_manager on customerwise_sales, sales_lines and sales_invoices.

@@ -905,6 +905,15 @@ create policy mk_own_enq_cust on enquiries as restrictive for all to authenticat
 create or replace function trg_cust_mobile() returns trigger language plpgsql as $$ begin new.mobile := coalesce(new.mobile,''); return new; end $$;
 drop trigger if exists t_cust_mobile on customers; create trigger t_cust_mobile before insert or update on customers for each row execute function trg_cust_mobile();
 
+-- ---------- v1.9.2 (Bala t52u): factory manager (fm) can view Sales analysis (full team view, read-only, like Accounts)
+-- additive SELECT-only policies; no write access; marketing restrictions unchanged (their restrictive policies still apply to them)
+drop policy if exists fm_cws_r on customerwise_sales;
+create policy fm_cws_r on customerwise_sales for select to authenticated using (has_role('factory_manager'));
+drop policy if exists fm_sl_r on sales_lines;
+create policy fm_sl_r on sales_lines for select to authenticated using (has_role('factory_manager'));
+drop policy if exists fm_si_r on sales_invoices;
+create policy fm_si_r on sales_invoices for select to authenticated using (has_role('factory_manager'));
+
 -- >>>>> storage.sql
 -- PO file storage (private bucket 'po-files'). Safe to re-run.
 insert into storage.buckets(id,name,public) values('po-files','po-files',false) on conflict (id) do nothing;
