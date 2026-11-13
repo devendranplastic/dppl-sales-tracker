@@ -87,3 +87,9 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
 - **info@ / HR Admin** see a "need review" banner and badge on Customers: **Review** (rename, contact, owner, mark reviewed), **✔ OK**, and **Merge duplicate** (`merge_customers`: moves enquiries, visits, samples, SKUs, orders, invoices and sales rows, keeps the old spelling as an alias, deletes the duplicate). Renaming also updates the customer name on its visit reports.
 - **Customerwise upload**: pending customers are listed first in the customer choice, with **✎ Rename … to this file name** or **→ keep its name**. Pending customers that the file matches or maps are marked reviewed after the import.
 - Visits and samples now store `customer_id`. A sample may be recorded against a customer before an enquiry exists.
+
+## v1.9.1: values in ₹ Lakhs, quantities in tons (Bala t50u)
+- Every rupee amount on screen, in charts and in Excel exports is shown in **₹ Lakhs** (e.g. ₹12.35 L). Every quantity is shown in **tons** (kg ÷ 1000, 2 decimals, e.g. 1,234.57 T).
+- Per-kg rates (cost/kg, price/kg, ₹/kg) stay in ₹ per kg.
+- The database still stores rupees and kg. The upload files (customerwise kg, Tally register) and the data-entry fields (enquiry qty, PO qty, dispatch qty, targets) are still entered in kg and full rupees. Each such field shows the tons or lakhs value under it as you type.
+- The raw table export on Import / Export stays in stored units, so it can be imported back.
