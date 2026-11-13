@@ -2,9 +2,9 @@ const $=s=>document.querySelector(s),A=document.getElementById('app');
 const esc=v=>String(v??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // v1.9 (Bala t50u): every rupee value shown in ₹ Lakhs, every quantity in tons (stored data stays ₹ and kg)
 const f2=n=>Number(+n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});window.f2=f2;
-const inr=n=>'₹'+f2((+n||0)/1e5)+' L';window.inr=inr;                       // ₹ value → ₹ Lakhs
+const inr=n=>'₹'+f2((+n||0)/1e5)+'\u00a0L';window.inr=inr;                       // ₹ value → ₹ Lakhs
 const rate=n=>n==null||n===''?'—':'₹'+f2(n);window.rate=rate;               // per-kg rates stay ₹/kg
-const tn=kg=>f2((+kg||0)/1000)+' T';window.tn=tn;                           // kg → tons
+const tn=kg=>f2((+kg||0)/1000)+'\u00a0T';window.tn=tn;                           // kg → tons
 window.LKn=n=>Math.round((+n||0)/1e3)/100;window.TNn=kg=>Math.round((+kg||0)/10)/100;   // numbers for Excel/CSV exports
 const today=()=>new Date().toISOString().slice(0,10);
 const fd=d=>d?new Date(d).toLocaleDateString('en-GB'):'';
