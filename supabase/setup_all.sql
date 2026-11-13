@@ -901,6 +901,9 @@ create policy mk_own_smp_cust on samples as restrictive for all to authenticated
  with check (not is_mkt() or ((customer_id is null or cust_mine(customer_id)) and (enquiry_id is null or enq_mine(enquiry_id))));
 drop policy if exists mk_own_enq_cust on enquiries;
 create policy mk_own_enq_cust on enquiries as restrictive for all to authenticated using (true) with check (not is_mkt() or customer_id is null or cust_mine(customer_id));
+-- customers.mobile is NOT NULL but many imported customers have none: the app sends '' as null, so keep it '' (fixes "Save changes" on such customers)
+create or replace function trg_cust_mobile() returns trigger language plpgsql as $$ begin new.mobile := coalesce(new.mobile,''); return new; end $$;
+drop trigger if exists t_cust_mobile on customers; create trigger t_cust_mobile before insert or update on customers for each row execute function trg_cust_mobile();
 
 -- >>>>> storage.sql
 -- PO file storage (private bucket 'po-files'). Safe to re-run.
