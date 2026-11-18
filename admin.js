@@ -7,7 +7,7 @@ const isWork=d=>!((CF.SKIP_SUNDAYS&&d.getDay()===0)||(CF.HOLIDAYS||[]).includes(
 window.workToday=()=>isWork(new Date());window.prevWorkDay=()=>{let d=new Date(Date.now()-864e5);for(let i=0;i<14&&!isWork(d);i++)d=new Date(d-864e5);return ymd(d)};
 const qOf=m=>m.slice(0,4)+'-Q'+(Math.floor((+m.slice(5,7)-1)/3)+1);
 window.tgt=(x,month,k)=>{const r=(D.targets||[]).find(t=>t.exec_id===x&&t.period===month)||null;return r&&r[k]!==''&&r[k]!=null?+r[k]:null};
-window.extraTabs=()=>[...(window.opsTabs?opsTabs():[]),...(window.histTabs?histTabs():[]),...(window.ops2Tabs?ops2Tabs():[]),...(can(U,'coll')?[['coll','Collections']]:[]),...(can(U,'targets')&&!can(U,'admin')?[['tgt','Targets']]:[]),...(can(U,'admin_view')?[['ana','Analysis'],['setup','Setup']]:[])];
+window.extraTabs=()=>[...(window.opsTabs?opsTabs():[]),...(window.histTabs?histTabs():[]),...(window.ops2Tabs?ops2Tabs():[]),...(can(U,'coll')?[['coll','Collections']]:[]),...(can(U,'targets')&&!can(U,'admin')?[['tgt','Targets']]:[]),...(can(U,'admin_view')?[/* v1.9.6 (Bala t63u): 'Analysis' (ERP register based, no data) hidden from the menu; view code kept: ['ana','Analysis'], */['setup','Setup']]:[])];
 const RO=()=>can(U,'admin')?'':'disabled';
 const marketingExecs=()=>[...new Set((D.profiles||[]).filter(p=>(p.role==='marketing'||(p.caps||[]).includes('sales_person'))&&p.active!==false).map(p=>p.id).concat(execs()))];
 // ----- Setup
