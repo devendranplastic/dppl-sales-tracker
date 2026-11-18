@@ -7,7 +7,7 @@ const cnum=x=>{const a=Math.abs(x),d=a>=100?0:a>=10?1:2;return x.toLocaleString(
 window.VL={T:kg=>cnum((+kg||0)/1000),L:r=>cnum((+r||0)/1e5),P:p=>Math.round(p)+'%',cnum,phone};
 // shorten long category labels on phone (names, products)
 window.VL.short=(s,n)=>{s=String(s??'');n=n||(phone()?12:22);return s.length>n?s.slice(0,n-1)+'…':s};
-Chart.register({id:'vlab',afterDatasetsDraw(ch,_a,o){if(!o||!o.fmt)return;const c=ch.ctx,horiz=ch.options.indexAxis==='y',ca=ch.chartArea;
+Chart.register({id:'vlab',descriptors:{_scriptable:false,_indexable:false},afterDatasetsDraw(ch,_a,o){if(!o||!o.fmt)return;const c=ch.ctx,horiz=ch.options.indexAxis==='y',ca=ch.chartArea;
  c.save();c.textBaseline='middle';
  ch.data.datasets.forEach((ds,di)=>{const m=ch.getDatasetMeta(di);if(m.hidden||!ch.isDatasetVisible(di))return;const type=m.type||ds.type||ch.config.type;
   if(type==='doughnut'||type==='pie'){const tot=ds.data.reduce((s,v)=>s+(+v||0),0);m.data.forEach((el,i)=>{const v=+ds.data[i]||0;if(!tot||v/tot<0.05)return;const p=el.tooltipPosition();c.font=`bold ${phone()?10:11}px sans-serif`;c.fillStyle='#fff';c.textAlign='center';c.fillText(o.pie?o.pie(v,tot):Math.round(v/tot*100)+'%',p.x,p.y)});return}
@@ -22,7 +22,7 @@ Chart.register({id:'vlab',afterDatasetsDraw(ch,_a,o){if(!o||!o.fmt)return;const 
    else{c.save();c.translate(el.x,top-3);c.rotate(-Math.PI/2);c.textAlign='left';c.font=`${Math.max(8,Math.min(10,bw*0.95))}px sans-serif`;c.fillText(t,0,0);c.restore()}})});
  c.restore()}});
 // headroom so labels above the tallest bar are not cut off
-Chart.register({id:'vlabRoom',beforeInit(ch){const o=ch.options.plugins&&ch.options.plugins.vlab;if(!o||!o.fmt)return;const sc=ch.options.scales||{},k=ch.options.indexAxis==='y'?'x':'y';
+Chart.register({id:'vlabRoom',beforeInit(ch){const C=ch.config.options||{},o=C.plugins&&C.plugins.vlab;if(!o||!o.fmt)return;const sc=C.scales||{},k=C.indexAxis==='y'?'x':'y';
  Object.entries(sc).forEach(([id,s])=>{if((s.axis||id[0])===k&&s.grace==null)s.grace=phone()?'22%':'12%'})}});
 // phone-friendly defaults: smaller fonts, compact legends, rotated/skipped month labels
 const D=Chart.defaults;D.font.size=phone()?10:12;D.plugins.legend.labels.boxWidth=phone()?10:14;D.plugins.legend.labels.padding=phone()?6:10;
