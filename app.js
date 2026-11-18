@@ -30,17 +30,21 @@ window.ME=()=>U&&U.role==='data_entry'&&U.delegate_for?U.delegate_for:U&&U.id;
 const cname=id=>(D.customers.find(c=>c.id===id)||{}).name||'';
 const fv=f=>Object.fromEntries(new FormData(f));
 function loginPage(msg){A.innerHTML=`<div class="auth"><img src="assets/dppl_company_logo.png" alt="DPPL - Devendran Plastic Pvt. Ltd."><h2>Sales & Order Tracker</h2>
-<form id="lf"><label>Email</label><input name="email" type="email" required><label>Password</label><input name="pw" type="password" required><button style="width:100%">Sign in</button></form>
+<form id="lf"><label>Email</label><input name="email" type="email" autocomplete="username" required value="${esc(localStorage.getItem('dppl_last_email')||'')}"><label>Password</label><input name="pw" type="password" autocomplete="current-password" required>
+<label class="remme"><input type="checkbox" name="rem" ${window.REM&&!REM.on()?'':'checked'}> Keep me signed in on this device</label><button style="width:100%">Sign in</button></form>
+${localStorage.getItem('dppl_last_email')?'<p><small><a href="#" id="lfNot">Not you? Use a different email</a></small></p>':''}
 ${msg?`<p class="bad">${esc(msg)}</p>`:''}<p><small>Mode: ${DB.mode}</small></p>
 ${DB.mode!=='Supabase'?`<div class="card" style="text-align:left;font-size:13px"><b>Demo accounts</b><table>${DEMO_USERS.map(u=>`<tr><td>${u.role}</td><td>${u.email}</td><td>${u.pw}</td></tr>`).join('')}</table></div>`:''}</div>`;
-$('#lf').onsubmit=async e=>{e.preventDefault();const f=fv(e.target);try{U=await DB.login(f.email,f.pw);HS.length=0;view='dash';sel=null;await audit('login','auth',null);start()}catch(x){loginPage(x.message)}}}
-function outPage(){A.innerHTML=`<div class="auth"><img src="assets/bala_hr_logo.png" alt="Bala HR" style="max-width:240px"><h2>You have signed out</h2><p>Thank you for using the DPPL Sales & Order Tracker.</p><button onclick="loginPage()">Sign in again</button></div>`}
+const nt=$('#lfNot');if(nt)nt.onclick=e=>{e.preventDefault();localStorage.removeItem('dppl_last_email');loginPage(msg)};
+$('#lf').onsubmit=async e=>{e.preventDefault();const f=fv(e.target),rem=!!f.rem;if(window.REM)REM.set(rem);if(rem)localStorage.setItem('dppl_last_email',f.email.trim().toLowerCase());else localStorage.removeItem('dppl_last_email');try{U=await DB.login(f.email,f.pw);HS.length=0;view='dash';sel=null;await audit('login','auth',null);start()}catch(x){loginPage(x.message)}}}
+// v1.9.4 (Bala t57u/t59u): the MD login's sign-out screen shows the DPPL logo instead of the Bala HR logo; other logins unchanged
+function outPage(role){A.innerHTML=`<div class="auth">${role==='md'?'<img src="assets/dppl_company_logo.png" alt="DPPL - Devendran Plastic Pvt. Ltd.">':'<img src="assets/bala_hr_logo.png" alt="Bala HR" style="max-width:240px">'}<h2>You have signed out</h2><p>Thank you for using the DPPL Sales & Order Tracker.</p><button onclick="loginPage()">Sign in again</button></div>`}
 window.loginPage=loginPage;
 async function start(){if(U&&U.must_change_password)return pwPage();await load();LIVE.last=Date.now();render();startLive()}
 function pwPage(msg){A.innerHTML=`<div class="auth"><img src="assets/dppl_company_logo.png" alt="DPPL"><h2>Set a new password</h2><p><small>For security you must change the default password before using the app.</small></p>
 <form id="pwf"><label>New password (min 8 characters)</label><input name="p1" type="password" minlength="8" required autocomplete="new-password"><label>Confirm new password</label><input name="p2" type="password" minlength="8" required autocomplete="new-password"><button style="width:100%">Change password</button></form>${msg?`<p class="bad">${esc(msg)}</p>`:''}<p><a href="#" id="pwlo">Sign out</a></p></div>`;
 $('#pwf').onsubmit=async e=>{e.preventDefault();const f=fv(e.target);if(f.p1!==f.p2)return pwPage('Passwords do not match');if(!/[A-Za-z]/.test(f.p1)||!/\d/.test(f.p1))return pwPage('Use letters and numbers');try{await DB.changePassword(f.p1);U.must_change_password=false;await audit('password_changed','auth',null);start()}catch(x){pwPage(x.message)}};
-$('#pwlo').onclick=async e=>{e.preventDefault();await DB.logout();U=null;loginPage()}}
+$('#pwlo').onclick=async e=>{e.preventDefault();await DB.logout();U=null;clearUserCache();location.reload()}}
 function shell(body){const tabs=[['dash','Dashboard'],['tasks','Tasks'],['enq','Enquiries'],['cust','Customers'],...(can(U,'visit')||can(U,'full')?[['visits','Visits']]:[]),...(can(U,'inc_all')||can(U,'inc_own')?[['inc','Incentives']]:[]),...(window.extraTabs?extraTabs():[]),...(can(U,'full')?[['audit','Audit log']]:[]),['exp','Expenses <span class="tag risk">Future</span>']];
 const SEC=[['Home',['dash','tasks','inbox','alerts']],['Sales',['enq','orders','visits','sana','sales','inc','coll','ana']],['Customers & products',['cust','sku','samples','art','complaints']],['Planning & dispatch',['dplan','actcost']],['Targets & messages',['tgt']],['Setup & data',['io','supl','hist','setup','audit','exp']]];
  const used=new Set(),groups=SEC.map(([t,ks])=>[t,ks.map(k=>tabs.find(x=>x[0]===k)).filter(Boolean)]).filter(g=>g[1].length);groups.forEach(g=>g[1].forEach(x=>used.add(x[0])));const rest=tabs.filter(x=>!used.has(x[0]));if(rest.length)groups.push(['More',rest]);
@@ -56,7 +60,9 @@ const mb=$('#mnu');mb.onclick=()=>{if(matchMedia('(max-width:767px)').matches){c
 if(localStorage.getItem('dppl_sidehide'))document.body.classList.add('sidehide');
 $('#scrim').onclick=()=>document.body.classList.remove('drawer');$('#rf').onclick=()=>refreshData(true);
 const bl=$('#bell');if(bl)bl.onclick=()=>{view='inbox';sel=null;render()};
-$('#lo').onclick=async()=>{stopLive();await audit('logout','auth',null);await DB.logout();U=null;outPage()}}
+$('#lo').onclick=async()=>{stopLive();await audit('logout','auth',null);const r=U&&U.role;await DB.logout();U=null;clearUserCache();sessionStorage.setItem('dppl_signedout',r||'');location.reload()}}
+// drop the signed-out user's data (session storage + a full page reload clears all in-memory data, upload previews, filters) so nothing is left for the next person on a shared device
+function clearUserCache(){try{D={};HS.length=0;view='dash';sel=null;sessionStorage.clear()}catch(e){}}
 const visible=()=>D.enquiries.filter(e=>U.role!=='marketing'||e.owner_id===ME()); // v1.8: marketing sees only own (also enforced by RLS)
 const HS=[];window.appBack=()=>{if(document.body.classList.contains('drawer')){document.body.classList.remove('drawer');return true}if(!U||HS.length<2)return false;HS.pop();const t=HS[HS.length-1];view=t.v;sel=t.s;render(1);return true};
 function render(bk){if(!bk){const t=HS[HS.length-1];if(!t||t.v!==view||t.s!==sel)HS.push({v:view,s:sel});if(HS.length>50)HS.shift()}const fn={...(window.VIEWS||{}),visits:visitsV,inc:incV,dash,tasks,enq,cust,audit:auditV,detail}[view];shell(fn());(window['bind_'+view]||(()=>{}))()}

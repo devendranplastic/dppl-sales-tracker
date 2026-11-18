@@ -110,4 +110,4 @@ function anaV(){const E=marketingExecs().filter(x=>!af.exec_id||x===af.exec_id);
  <div class="card">Incentive earned (all won)<div class="kpi">${inr(Math.round(W.reduce((a,w)=>a+w.inc,0)))}</div><small>${[...new Set(W.map(w=>w.e.owner_id))].map(o=>`${esc(pname(o))}: ${inr(Math.round(W.filter(w=>w.e.owner_id===o).reduce((a,w)=>a+w.inc,0)))}`).join(' · ')||'No won deals'}</small></div></div>`}
 window.bind_ana=()=>{$('#ap').onchange=e=>{af.period=e.target.value;render()};$('#ax').onchange=e=>{af.exec_id=e.target.value;render()}};
 window.VIEWS={...(window.VIEWS||{}),setup:setupV,coll:collV,ana:anaV,tgt:tgtV};
-(async()=>{try{U=await DB.user()}catch(e){return loginPage(e.message)}U?start():loginPage()})();
+(async()=>{const so=sessionStorage.getItem('dppl_signedout');sessionStorage.removeItem('dppl_signedout');try{U=await DB.user()}catch(e){return loginPage(e.message)}U?start():so!==null?outPage(so):loginPage()})();

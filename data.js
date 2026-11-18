@@ -17,7 +17,14 @@ window.can=(u,p)=>!!(u&&((ROLE[u.role]||{})[p]||(u.caps||[]).some(c=>(CAPS[c]||{
 const TABLES=['customerwise_uploads','customerwise_sales','product_variants','sales_invoices','actual_costs','dispatch_plans','import_logs','customer_history','sales_uploads','sales_lines','exec_aliases','messages','message_recipients','skus','samples','artworks','orders','order_stages','dispatches','complaints','customers','enquiries','specs','costings','quotations','activities','tasks','audit_log'];
 const cfg=window.DPPL_CONFIG||{};
 const useSB=!!(cfg.USE_SUPABASE&&cfg.SUPABASE_URL&&cfg.SUPABASE_ANON_KEY&&window.supabase);
-const sb=useSB?window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY):null;
+// v1.9.4 remember-me: "Keep me signed in" ON -> Supabase session in localStorage (survives restarts, auto refresh);
+// OFF -> sessionStorage (ends when the browser/app closes). We never store passwords, only Supabase's own tokens.
+const REM={on(){return localStorage.getItem('dppl_remember')!=='0'},set(v){localStorage.setItem('dppl_remember',v?'1':'0')}};
+const authStore={getItem:k=>(REM.on()?localStorage:sessionStorage).getItem(k)||(REM.on()?sessionStorage:localStorage).getItem(k),
+ setItem:(k,v)=>{const a=REM.on()?localStorage:sessionStorage,o=a===localStorage?sessionStorage:localStorage;a.setItem(k,v);o.removeItem(k)},
+ removeItem:k=>{localStorage.removeItem(k);sessionStorage.removeItem(k)}};
+const sb=useSB?window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storage:authStore}}):null;
+window.REM=REM;
 const uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now()+''+Math.random();
 const LS={
   _g(t){return JSON.parse(localStorage.getItem('dppl_'+t)||'[]')},_s(t,v){localStorage.setItem('dppl_'+t,JSON.stringify(v))},
@@ -51,8 +58,8 @@ const SB={
   async changePassword(pw){const{error}=await sb.auth.updateUser({password:pw});if(error)throw error;const{error:e2}=await sb.rpc('password_changed');if(e2)throw e2},
   async invite(body){const{data,error}=await sb.functions.invoke('invite-user',{body});if(error)throw error;if(data&&data.error)throw new Error(data.error);return data},
   async login(email,pw){const{error}=await sb.auth.signInWithPassword({email,password:pw});if(error)throw error;return this.user()},
-  async logout(){await sb.auth.signOut()},
-  async user(){const{data}=await sb.auth.getUser();if(!data.user)return null;const{data:p}=await sb.from('profiles').select('*').eq('id',data.user.id).single();if(p&&p.active===false){await sb.auth.signOut();throw new Error('This user is deactivated')}return{email:data.user.email,id:data.user.id,delegate_for:p?.delegate_for||null,caps:p?.caps||[],must_change_password:!!p?.must_change_password,role:p?.role||'dispatch',name:p?.full_name||data.user.email}}
+  async logout(){await sb.auth.signOut({scope:'local'})}, // this device only: logging out on the phone no longer signs the same login out of other devices
+  async user(){let r;for(let i=0;i<3;i++){r=await sb.auth.getUser();if(r.data.user||!r.error||!/fetch|network|Failed/i.test(r.error.name+' '+r.error.message))break;await new Promise(z=>setTimeout(z,1500))}const data=r.data;if(!data.user){if(r.error&&/fetch|network|Failed/i.test(r.error.name+' '+r.error.message))throw new Error('No internet connection — you are still signed in. Please retry.');return null}const{data:p}=await sb.from('profiles').select('*').eq('id',data.user.id).single();if(p&&p.active===false){await sb.auth.signOut();throw new Error('This user is deactivated')}return{email:data.user.email,id:data.user.id,delegate_for:p?.delegate_for||null,caps:p?.caps||[],must_change_password:!!p?.must_change_password,role:p?.role||'dispatch',name:p?.full_name||data.user.email}}
 };
 window.DB=useSB?SB:LS;window.DB.mode=useSB?'Supabase':'Local demo';
 async function audit(action,table,id,detail){if(useSB)return; /* DB triggers audit every write in Supabase mode */try{const u=await DB.user();await DB.insert('audit_log',{action,table_name:table,record_id:id,detail:JSON.stringify(detail||{}),user_email:u?.email})}catch(e){}}
