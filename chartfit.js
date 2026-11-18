@@ -4,7 +4,7 @@
 const phone=()=>matchMedia('(max-width:767px)').matches;
 // compact numbers for labels: 1234.5 -> 1,235 · 45.67 -> 45.7 · 3.456 -> 3.46
 const cnum=x=>{const a=Math.abs(x),d=a>=100?0:a>=10?1:2;return x.toLocaleString('en-IN',{minimumFractionDigits:0,maximumFractionDigits:d})};
-window.VL={T:kg=>cnum((+kg||0)/1000),L:r=>cnum((+r||0)/1e5),P:p=>Math.round(p)+'%',cnum,phone};
+window.VL={AX:v=>'₹'+cnum((+v||0)/1e5)+' L',T:kg=>cnum((+kg||0)/1000),L:r=>cnum((+r||0)/1e5),P:p=>Math.round(p)+'%',cnum,phone};
 // shorten long category labels on phone (names, products)
 window.VL.short=(s,n)=>{s=String(s??'');n=n||(phone()?12:22);return s.length>n?s.slice(0,n-1)+'…':s};
 Chart.register({id:'vlab',descriptors:{_scriptable:false,_indexable:false},afterDatasetsDraw(ch,_a,o){if(!o||!o.fmt)return;const c=ch.ctx,horiz=ch.options.indexAxis==='y',ca=ch.chartArea;

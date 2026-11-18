@@ -101,3 +101,8 @@ HR Admin implicitly has all flags. Flags are enforced by row-level security (`ha
 ## v1.9.3: latest month by marketing person on team dashboards
 - The dashboard for team-view logins (FM, CEO, MD, HR Admin, Accounts, info@, planning, despatch) has a new table under the summary cards: **"<latest month> by marketing person (tons)"**. It shows, per marketing person, the actual tons for the latest uploaded month, the target for that month, % achieved, the same month last year and the change. A team total row is included.
 - Marketing logins are unchanged: they still see only their own figures.
+
+## v1.9.5: chart labels and phone-fit charts
+- Every bar shows its value: tons on volume charts, ₹ Lakhs on value charts (numbers only; the unit is on the axis). Big numbers have no decimals, smaller ones 1–2. If a label is wider than its bar it is shrunk, and then turned upright. Zero bars have no label. Doughnut slices of 5% or more show their %.
+- Charts fit the phone: smaller fonts and legend boxes, long names shortened with "…", month labels rotate or skip when crowded, horizontal bar lists grow taller with the number of rows, and ₹ axes read "₹20 L" instead of "₹20.00 L".
+- Code: `chartfit.js` (a small Chart.js plugin, no extra library).
